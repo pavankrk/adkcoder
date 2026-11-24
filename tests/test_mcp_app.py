@@ -125,3 +125,58 @@ def test_scaffold_mcp_app_template(tmp_path):
     assert (proj / "docs/ARCHITECTURE.md").is_file()
     assert "ui://demo-widget/app.html" in (proj / "server/main.py").read_text(encoding="utf8")
     assert "${PLUGIN_ROOT}" in (proj / "mcp_config.json").read_text(encoding="utf8")
+
+
+
+def test_standalone_browser_workbench_routes(tmp_path):
+    from adk_coder.workbench_ui import dispatch_workbench_request
+
+    env_file = tmp_path / ".env"
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/PLAN.md").write_text("# Plan\nHello\n", encoding="utf8")
+    (tmp_path / "app.py").write_text('@app.get("/v1/ping")\ndef ping(): return eval("1")\n', encoding="utf8")
+
+    st, ct, html = dispatch_workbench_request("GET", "/", {}, env_file, tmp_path)
+    assert st == 200 and "text/html" in ct and b"ADK Coder Workbench" in html
+
+    st, ct, settings_html = dispatch_workbench_request("GET", "/settings", {}, env_file, tmp_path)
+    assert st == 200 and "text/html" in ct and b"ADK Coder" in settings_html
+
+    st, _, snap_raw = dispatch_workbench_request("GET", "/api/workbench/snapshot", {}, env_file, tmp_path)
+    assert st == 200
+    snap = json.loads(snap_raw)
+    assert snap["workspace_name"] == tmp_path.name
+    assert snap["diagram"]["routes"][0]["path"] == "/v1/ping"
+
+    st, _, sec_raw = dispatch_workbench_request(
+        "POST", "/api/workbench/security", {"workspace": str(tmp_path)}, env_file, tmp_path
+    )
+    assert st == 200 and json.loads(sec_raw)["ok"] is True
+
+    st, _, save_raw = dispatch_workbench_request(
+        "POST",
+        "/api/workbench/save-doc",
+        {"workspace": str(tmp_path), "rel_path": "docs/PLAN.md", "content": "# Plan\nSaved via UI\n"},
+        env_file,
+        tmp_path,
+    )
+    assert st == 200 and json.loads(save_raw)["ok"] is True
+    assert "Saved via UI" in (tmp_path / "docs/PLAN.md").read_text(encoding="utf8")
+
+
+def test_cli_ui_config_and_mcp_subcommands(tmp_path, monkeypatch, capsys):
+    from adk_coder import cli as cli_mod
+    from adk_coder import config_ui, workbench_ui
+
+    called: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(workbench_ui, "main", lambda argv: (called.append(("ui", argv)) or 0))
+    monkeypatch.setattr(config_ui, "main", lambda argv: (called.append(("config", argv)) or 0))
+
+    assert cli_mod.main(["--workspace", str(tmp_path), "-ui"]) == 0
+    assert cli_mod.main(["--workspace", str(tmp_path), "ui"]) == 0
+    assert cli_mod.main(["--workspace", str(tmp_path), "config"]) == 0
+    assert [c[0] for c in called] == ["ui", "ui", "config"]
+
+    assert cli_mod.main(["mcp", "--check"]) == 0
+    out = capsys.readouterr().out
+    assert "MCP Server OK" in out

@@ -6,6 +6,7 @@
   "bin": {
     "adk-coder": "bin/adk-coder.js",
     "adk-coder-config": "bin/adk-coder-config.js",
+    "adk-coder-ui": "bin/adk-coder-ui.js",
     "adk-coder-mcp": "bin/adk-coder-mcp.js"
   },
   "files": [

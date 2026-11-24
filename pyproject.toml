@@ -18,6 +18,7 @@ dev = ["pytest>=8", "ruff>=0.3"]
 [project.scripts]
 adk-coder = "adk_coder.cli:main"
 adk-coder-config = "adk_coder.config_ui:main"
+adk-coder-ui = "adk_coder.workbench_ui:main"
 adk-coder-mcp = "adk_coder.mcp_server:main"
 
 [tool.setuptools.packages.find]

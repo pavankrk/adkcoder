@@ -348,6 +348,18 @@ def main(argv: list[str] | None = None) -> int:
         "--config", dest="open_config", action="store_true",
         help="Launch the lightweight Web Settings UI to configure LLM models and test connectivity.",
     )
+    parser.add_argument(
+        "--ui", dest="open_ui", action="store_true",
+        help="Launch the standalone ADK Coder Browser Workbench (Docs, Security, SBOM, Diagrams, Profiles, Scaffold).",
+    )
+    parser.add_argument(
+        "--mcp", dest="run_mcp", action="store_true",
+        help="Run the ADK Coder MCP App server over stdio (or use `adk-coder mcp --check`).",
+    )
+    parser.add_argument(
+        "--port", type=int, default=None,
+        help="Optional port override for --config (default 8089) or --ui (default 8090).",
+    )
     parser.add_argument("--install-completion", choices=["bash", "zsh"])
     parser.add_argument(
         "--install-mcp-plugin",
@@ -355,16 +367,68 @@ def main(argv: list[str] | None = None) -> int:
         help="Install the ADK Coder Workbench Antigravity MCP App plugin into ~/.gemini/config/plugins/.",
     )
     parser.add_argument("request", nargs=argparse.REMAINDER)
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    # Tolerate single-dash `-ui` / `-config` / `-mcp` aliases gracefully
+    raw_argv = [
+        ("--" + a[1:]) if a in {"-ui", "-config", "-mcp"} else a
+        for a in raw_argv
+    ]
+    args = parser.parse_args(raw_argv)
     if args.request[:1] == ["--"]:
         args.request = args.request[1:]
+
+    # Also support intuitive subcommand forms: `adk-coder ui`, `adk-coder config`, `adk-coder mcp`
+    if args.request and args.request[0] == "ui" and not args.print_mode and not args.json_output:
+        args.open_ui = True
+        args.request = args.request[1:]
+    elif args.request and args.request[0] == "config" and not args.print_mode and not args.json_output:
+        args.open_config = True
+        args.request = args.request[1:]
+    elif args.request and args.request[0] == "mcp" and not args.print_mode and not args.json_output:
+        args.run_mcp = True
+        args.request = args.request[1:]
+
     try:
         from .config_ui import load_global_env
         from .config_ui import main as config_main
 
         load_global_env()
+        if args.open_ui:
+            from .workbench_ui import main as ui_main
+
+            ui_args = ["--workspace", str(args.workspace)]
+            if args.port:
+                ui_args.extend(["--port", str(args.port)])
+            ui_args.extend(args.request)
+            return ui_main(ui_args)
         if args.open_config:
-            return config_main(["--workspace", str(args.workspace)])
+            cfg_args = ["--workspace", str(args.workspace)]
+            if args.port:
+                cfg_args.extend(["--port", str(args.port)])
+            cfg_args.extend(args.request)
+            return config_main(cfg_args)
+        if args.run_mcp:
+            if "--install" in args.request:
+                from .mcp_plugin import install_mcp_plugin
+
+                plugin_dir = install_mcp_plugin()
+                print(f"Installed Antigravity MCP App plugin at {plugin_dir}")
+                return 0
+            if "--check" in args.request:
+                from .mcp_server import APP_URI, create_mcp_server, load_workbench_html
+
+                srv = create_mcp_server()
+                tools = asyncio.run(srv.list_tools())
+                resources = asyncio.run(srv.list_resources())
+                print(
+                    f"MCP Server OK: {len(tools)} tools, {len(resources)} resource(s), "
+                    f"UI HTML={len(load_workbench_html()):,} bytes ({APP_URI})"
+                )
+                return 0
+            from .mcp_server import main as mcp_main
+
+            mcp_args = ["--workspace", str(args.workspace), *args.request]
+            return mcp_main(mcp_args)
         if args.install_completion:
             install(args.install_completion)
             return 0
