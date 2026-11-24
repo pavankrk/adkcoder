@@ -1,0 +1,14 @@
+package main
+
+import (
+	"testing"
+
+	"google.golang.org/adk/cmd/launcher/web"
+	"google.golang.org/adk/cmd/launcher/web/a2a"
+)
+
+func TestA2ALaunchConfiguration(t *testing.T) {
+	if _, err := web.NewLauncher(a2a.NewLauncher()).Parse(serverArgs()); err != nil {
+		t.Fatal(err)
+	}
+}

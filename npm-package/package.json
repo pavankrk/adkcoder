@@ -1,0 +1,27 @@
+{
+  "name": "adk-coder",
+  "version": "1.0.0",
+  "description": "Interactive Google ADK coding assistant CLI & Settings UI (npm/npx wrapper)",
+  "license": "Apache-2.0",
+  "bin": {
+    "adk-coder": "bin/adk-coder.js",
+    "adk-coder-config": "bin/adk-coder-config.js"
+  },
+  "files": [
+    "bin/",
+    "wheels/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "adk",
+    "google-adk",
+    "coding-assistant",
+    "cli",
+    "ai",
+    "llm",
+    "ollama"
+  ]
+}

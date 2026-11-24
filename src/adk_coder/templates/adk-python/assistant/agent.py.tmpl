@@ -1,0 +1,6 @@
+import os
+from google.adk import Agent, Workflow
+
+assistant = Agent(name="{identifier}", model=os.getenv("ADK_MODEL", "gemini-2.5-flash"),
+                  instruction="Help the user solve their request.")
+root_agent = Workflow(name="{identifier}_workflow", edges=[("START", assistant)])

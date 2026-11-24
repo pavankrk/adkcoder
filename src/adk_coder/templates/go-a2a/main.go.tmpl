@@ -1,0 +1,44 @@
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+
+	"google.golang.org/adk/agent"
+	"google.golang.org/adk/agent/llmagent"
+	"google.golang.org/adk/cmd/launcher"
+	"google.golang.org/adk/cmd/launcher/web"
+	"google.golang.org/adk/cmd/launcher/web/a2a"
+	"google.golang.org/adk/model/gemini"
+	"google.golang.org/adk/session"
+	"google.golang.org/genai"
+)
+
+func main() {
+	ctx := context.Background()
+	model, err := gemini.NewModel(ctx, "gemini-2.5-flash", &genai.ClientConfig{APIKey: os.Getenv("GOOGLE_API_KEY")})
+	if err != nil {
+		log.Fatal(err)
+	}
+	service, err := llmagent.New(llmagent.Config{
+		Name: "{identifier}", Description: "A helpful A2A assistant.", Model: model,
+		Instruction: "Answer the user's request.",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	server := web.NewLauncher(a2a.NewLauncher())
+	if _, err := server.Parse(serverArgs()); err != nil {
+		log.Fatal(err)
+	}
+	if err := server.Run(ctx, &launcher.Config{
+		AgentLoader: agent.NewSingleLoader(service), SessionService: session.InMemoryService(),
+	}); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func serverArgs() []string {
+	return []string{"--port", "8001", "a2a", "--a2a_agent_url", "http://localhost:8001"}
+}

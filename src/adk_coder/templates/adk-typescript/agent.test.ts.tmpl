@@ -1,0 +1,7 @@
+import { expect, test } from 'vitest';
+import { rootAgent, settings } from './agent';
+
+test('initializes the configured agent', () => {
+  expect(rootAgent.name).toBe('{identifier}');
+  expect(settings.safeParse({ ADK_MODEL: '' }).success).toBe(false);
+});

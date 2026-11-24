@@ -1,0 +1,9 @@
+import { LlmAgent } from '@google/adk';
+import { z } from 'zod';
+
+export const settings = z.object({ ADK_MODEL: z.string().min(1).default('gemini-2.5-flash') });
+export const rootAgent = new LlmAgent({
+  name: '{identifier}',
+  model: settings.parse(process.env).ADK_MODEL,
+  instruction: 'Help the user solve their request.',
+});
