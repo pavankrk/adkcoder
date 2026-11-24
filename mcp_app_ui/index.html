@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ADK Coder Workbench</title>
+  <style>
+    :root {
+      --bg: var(--color-background-primary, #f6f8fc);
+      --surface: var(--color-background-secondary, #ffffff);
+      --surface-alt: var(--color-background-tertiary, #edf2fa);
+      --text: var(--color-text-primary, #1f1f1f);
+      --muted: var(--color-text-secondary, #5f6368);
+      --border: var(--color-border-primary, #e0e3eb);
+      --accent: var(--color-text-info, #0b57d0);
+      --accent-bg: var(--color-background-info, #d3e3fd);
+      --ok: var(--color-text-success, #137333);
+      --ok-bg: var(--color-background-success, #e6f4ea);
+      --warn: var(--color-text-warning, #b06000);
+      --warn-bg: var(--color-background-warning, #fef7e0);
+      --danger: var(--color-text-danger, #b3261e);
+      --danger-bg: var(--color-background-danger, #fce8e6);
+      --font: var(--font-sans, "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--accent-bg);
+      color: var(--accent);
+    }
+    .badge.ok { background: var(--ok-bg); color: var(--ok); }
+    .badge.warn { background: var(--warn-bg); color: var(--warn); }
+    .badge.danger { background: var(--danger-bg); color: var(--danger); }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .tab-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-weight: 500;
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .tab-btn:hover { background: var(--surface-alt); color: var(--text); }
+    .tab-btn.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+    .content { padding: 14px; max-width: 1100px; margin: 0 auto; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .card-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .metric {
+      background: var(--surface-alt);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .metric .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .metric .value { font-size: 20px; font-weight: 600; margin-top: 2px; }
+    input, select, textarea {
+      font: inherit;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 10px;
+      width: 100%;
+    }
+    textarea {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      min-height: 220px;
+      resize: vertical;
+    }
+    .btn {
+      font: inherit;
+      font-weight: 500;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .btn:hover { background: var(--surface-alt); }
+    .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+    .btn.tonal { background: var(--accent-bg); color: var(--accent); border-color: transparent; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td {
+      text-align: left;
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+    .toast {
+      padding: 8px 12px;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      display: none;
+    }
+    .toast.show { display: block; }
+    .toast.ok { background: var(--ok-bg); color: var(--ok); }
+    .toast.err { background: var(--danger-bg); color: var(--danger); }
+    .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span>ADK Coder Workbench</span>
+      <span id="wsBadge" class="badge">Loading...</span>
+    </div>
+    <div class="row">
+      <input id="wsInput" style="width:230px" placeholder="Workspace path..." />
+      <button id="refreshBtn" class="btn tonal" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabBar">
+    <button class="tab-btn active" data-tab="overview" type="button">Plan &amp; Docs</button>
+    <button class="tab-btn" data-tab="security" type="button">Security &amp; SOLID</button>
+    <button class="tab-btn" data-tab="sbom" type="button">SBOM &amp; Licenses</button>
+    <button class="tab-btn" data-tab="diagram" type="button">Diagram &amp; APIs</button>
+    <button class="tab-btn" data-tab="profiles" type="button">Profiles</button>
+    <button class="tab-btn" data-tab="scaffold" type="button">Scaffold Studio</button>
+  </nav>
+
+  <main class="content">
+    <div id="toast" class="toast"></div>
+    <div id="view"></div>
+  </main>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

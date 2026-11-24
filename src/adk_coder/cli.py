@@ -349,6 +349,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Launch the lightweight Web Settings UI to configure LLM models and test connectivity.",
     )
     parser.add_argument("--install-completion", choices=["bash", "zsh"])
+    parser.add_argument(
+        "--install-mcp-plugin",
+        action="store_true",
+        help="Install the ADK Coder Workbench Antigravity MCP App plugin into ~/.gemini/config/plugins/.",
+    )
     parser.add_argument("request", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.request[:1] == ["--"]:
@@ -362,6 +367,13 @@ def main(argv: list[str] | None = None) -> int:
             return config_main(["--workspace", str(args.workspace)])
         if args.install_completion:
             install(args.install_completion)
+            return 0
+        if args.install_mcp_plugin:
+            from .mcp_plugin import install_mcp_plugin
+
+            plugin_dir = install_mcp_plugin()
+            print(f"Installed Antigravity MCP App plugin at {plugin_dir}")
+            print("Open 'ADK Coder Workbench' from Antigravity's side pane '+' menu or sidebar.")
             return 0
         approve_fn = (lambda _: True) if args.auto_yes else None
         harness = (

@@ -38,6 +38,13 @@ STACKS = {
         "mvn -B test",
         "mvn spring-boot:run",
     ),
+    "mcp-app": (
+        "python",
+        "3.12",
+        "python -m pip install -e '.[dev]'",
+        "python -m pytest",
+        "python -m server.main",
+    ),
 }
 
 
@@ -77,6 +84,14 @@ flowchart LR
     App --> Ports["Port Interfaces (ports/)"]
     App --> Domain["Domain Entities (domain/)"]
     Persist["Persistence Adapters (adapters/out/persistence)"] -.implements.-> Ports
+```"""
+    if stack == "mcp-app":
+        return """```mermaid
+flowchart LR
+    Host["Antigravity Host"] <-->|"JSON-RPC / postMessage"| UI["Single-File HTML App (web/src/main.ts)"]
+    UI <-->|"tools/call + ui:// resource"| Server["MCP App Server (server/main.py)"]
+    Server --> Domain["Domain & Ports (server/domain/ · server/ports/)"]
+    Adapters["JSON Store Adapter (server/adapters/)"] -.implements.-> Domain
 ```"""
     return """```mermaid
 flowchart LR

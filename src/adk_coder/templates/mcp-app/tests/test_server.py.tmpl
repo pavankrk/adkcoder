@@ -1,0 +1,8 @@
+from server.main import APP_URI, MIME_MCP_APP, create_server
+
+
+def test_mcp_app_server_registers_resource_and_tools():
+    srv = create_server()
+    assert APP_URI.startswith("ui://")
+    assert MIME_MCP_APP == "text/html;profile=mcp-app"
+    assert srv is not None

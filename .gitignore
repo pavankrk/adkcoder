@@ -17,6 +17,7 @@ htmlcov/
 
 # Node / npm bundle artifacts
 node_modules/
+mcp_app_ui/node_modules/
 npm-package/wheels/
 *.tgz
 

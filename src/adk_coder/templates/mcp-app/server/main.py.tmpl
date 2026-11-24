@@ -1,0 +1,62 @@
+"""MCP App (SEP-1865) server for {name}."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+APP_URI = "ui://{name}/app.html"
+MIME_MCP_APP = "text/html;profile=mcp-app"
+
+PANE_META: dict[str, Any] = {
+    "ui": {"resourceUri": APP_URI},
+    "com.google.antigravity/ui": {
+        "entrypoints": [
+            {"type": "aux_pane", "title": "{name}"},
+            {"type": "global", "title": "{name}"},
+        ]
+    },
+}
+APP_ONLY_META: dict[str, Any] = {"ui": {"visibility": ["app"]}}
+
+
+def load_html() -> str:
+    override = os.environ.get("MCP_APP_HTML", "").strip()
+    if override and Path(override).is_file():
+        return Path(override).read_text(encoding="utf8")
+    built = Path(__file__).resolve().parents[1] / "web" / "dist" / "index.html"
+    if built.is_file():
+        return built.read_text(encoding="utf8")
+    return "<!doctype html><html><body><h2>{name} MCP App</h2><p>Run npm run build in web/.</p></body></html>"
+
+
+def create_server():
+    try:
+        from mcp.server.mcpserver import MCPServer as ServerCls
+    except ImportError:
+        from mcp.server.fastmcp import FastMCP as ServerCls  # type: ignore[no-redef]
+
+    mcp = ServerCls(name="{name}")
+
+    @mcp.resource(APP_URI, name="{name} UI", mime_type=MIME_MCP_APP, meta={"ui": {"prefersBorder": False}})
+    def app_html() -> str:
+        return load_html()
+
+    @mcp.tool(name="open_app", title="{name}", meta=PANE_META)
+    def open_app(query: str = "") -> dict[str, Any]:
+        return {"app": "{name}", "query": query, "items": []}
+
+    @mcp.tool(name="app_ping", meta=APP_ONLY_META)
+    def app_ping() -> dict[str, Any]:
+        return {"ok": True, "app": "{name}"}
+
+    return mcp
+
+
+def main() -> None:
+    create_server().run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
