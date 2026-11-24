@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ADK Coder</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --sidebar: #f7f8fa;
+    --surface: #ffffff;
+    --hover: #eef1f6;
+    --active: #e6ecf8;
+    --user-bubble: #e8f0fe;
+    --border: #e6e8ee;
+    --focus: #1a73e8;
+    --text: #1f2328;
+    --muted: #656d76;
+    --green: #1a7f37;
+    --red: #cf222e;
+    --warn-bg: #fff8c5;
+    --warn-text: #9a6700;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13.5px; line-height: 1.5; }
+  .app { display: grid; grid-template-rows: 46px 1fr; height: 100vh; }
+
+  /* Top bar */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg);
+    -webkit-user-select: none; user-select: none;
+  }
+  .top-left, .top-center, .top-right { display: flex; align-items: center; gap: 6px; }
+  .icon-btn {
+    border: none; background: transparent; color: var(--muted); cursor: pointer;
+    width: 30px; height: 30px; border-radius: 7px; display: inline-flex;
+    align-items: center; justify-content: center; font-size: 14px;
+  }
+  .icon-btn:hover { background: var(--hover); color: var(--text); }
+  .ws-pill {
+    display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--sidebar);
+    font-size: 12.5px; color: var(--text); min-width: 240px; max-width: 420px;
+    cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ws-pill:hover { border-color: #cfd5df; }
+  .branch-tag { color: var(--muted); font-size: 11.5px; margin-left: auto; }
+
+  /* Main body grid */
+  .body { display: grid; grid-template-columns: 260px 1fr auto; height: 100%; overflow: hidden; position: relative; }
+  .body.sidebar-collapsed { grid-template-columns: 0px 1fr auto; }
+
+  /* Left Sidebar */
+  .sidebar {
+    background: var(--sidebar); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden; min-width: 0;
+  }
+  .side-top { padding: 10px 10px 6px; display: flex; flex-direction: column; gap: 2px; }
+  .side-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 10px; border-radius: 8px; border: none; background: transparent;
+    color: var(--text); font: inherit; font-size: 13px; cursor: pointer; text-align: left; width: 100%;
+  }
+  .side-item:hover { background: var(--hover); }
+  .side-item.active { background: var(--active); font-weight: 500; }
+  .kbd { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; background: #fff; }
+  .side-sec-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px 4px; font-size: 11.5px; font-weight: 600; color: var(--muted);
+  }
+  .sessions-scroll { flex: 1; overflow-y: auto; padding: 4px 8px 16px; }
+  .ws-group { margin-bottom: 8px; }
+  .ws-group-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 8px; border-radius: 7px; font-size: 12.5px; font-weight: 600;
+    color: var(--text); cursor: pointer;
+  }
+  .ws-group-head:hover { background: var(--hover); }
+  .sess-row {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 6px 10px 6px 20px; border-radius: 8px; cursor: pointer;
+    font-size: 12.5px; color: var(--text); margin-top: 2px;
+  }
+  .sess-row:hover { background: var(--hover); }
+  .sess-row.active { background: var(--active); }
+  .sess-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .diff-add { color: var(--green); font-weight: 600; }
+  .diff-del { color: var(--red); font-weight: 600; }
+
+  /* Center Chat Stage */
+  .stage { display: flex; flex-direction: column; height: 100%; overflow: hidden; position: relative; background: var(--bg); }
+  .chat-scroll { flex: 1; overflow-y: auto; padding: 20px 28px 18px; }
+  .chat-inner { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .empty-hero { text-align: center; padding: 64px 20px; color: var(--muted); }
+  .empty-hero h2 { color: var(--text); font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+  .quick-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+  .chip {
+    border: 1px solid var(--border); background: var(--sidebar); color: var(--text);
+    border-radius: 999px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+  }
+  .chip:hover { background: var(--active); border-color: #c5d6f5; }
+
+  .msg-user-wrap { display: flex; flex-direction: column; align-items: flex-end; }
+  .msg-user {
+    background: var(--user-bubble); color: var(--text);
+    padding: 10px 14px; border-radius: 12px; max-width: 78%;
+    white-space: pre-wrap; word-break: break-word; font-size: 13.5px;
+  }
+  .msg-time { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  .msg-agent { display: flex; flex-direction: column; gap: 8px; }
+  .steps-summary {
+    font-size: 12px; color: var(--muted); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; user-select: none;
+  }
+  .steps-list {
+    margin: 4px 0 6px; padding: 8px 12px; border-left: 2px solid var(--border);
+    font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px;
+  }
+  .thought-box {
+    font-size: 12px; color: var(--muted); background: #fafbfc;
+    border-left: 2px solid #d0d7de; padding: 6px 10px; border-radius: 4px;
+    white-space: pre-wrap; max-height: 160px; overflow-y: auto;
+  }
+  .md-body p { margin: 0 0 8px; }
+  .md-body p:last-child { margin-bottom: 0; }
+  .md-body h1, .md-body h2, .md-body h3 { margin: 12px 0 6px; font-size: 14.5px; }
+  .md-body ul, .md-body ol { margin: 4px 0 8px 20px; padding: 0; }
+  .md-body code {
+    font-family: var(--mono); font-size: 12px; background: #f2f4f8;
+    padding: 1px 5px; border-radius: 5px;
+  }
+  .code-wrap { position: relative; margin: 8px 0; }
+  .code-wrap pre {
+    margin: 0; padding: 11px 14px; border: 1px solid var(--border);
+    border-radius: 10px; background: #f8f9fb; overflow-x: auto;
+    font-family: var(--mono); font-size: 12px; line-height: 1.45;
+  }
+  .copy-code-btn {
+    position: absolute; top: 6px; right: 8px; border: 1px solid var(--border);
+    background: #fff; color: var(--muted); font-size: 11px; padding: 2px 7px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .copy-code-btn:hover { color: var(--text); background: var(--hover); }
+  .agent-footer { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+  .checkpoint-bar {
+    display: flex; align-items: center; gap: 10px; margin: 6px 0;
+    color: var(--muted); font-size: 11.5px;
+  }
+  .checkpoint-bar::before, .checkpoint-bar::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  .checkpoint-btn {
+    border: none; background: transparent; color: var(--muted); font: inherit;
+    cursor: pointer; padding: 2px 8px; border-radius: 6px;
+  }
+  .checkpoint-btn:hover { background: var(--hover); color: var(--text); }
+
+  .approval-card {
+    border: 1px solid #d4a72c; background: var(--warn-bg); color: var(--warn-text);
+    border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+  }
+
+  /* Composer */
+  .composer-area { padding: 8px 28px 16px; background: var(--bg); }
+  .composer-box {
+    max-width: 820px; margin: 0 auto;
+    border: 1.5px solid #cbd5e1; border-radius: 14px; background: #fff;
+    padding: 10px 12px 8px; transition: border-color 0.15s;
+  }
+  .composer-box:focus-within { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(26,115,232,0.12); }
+  .composer-box textarea {
+    width: 100%; border: none; outline: none; resize: none;
+    font: inherit; font-size: 13.5px; min-height: 44px; max-height: 180px;
+    background: transparent; color: var(--text);
+  }
+  .composer-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #f0f2f5;
+    flex-wrap: wrap;
+  }
+  .bar-left, .bar-right { display: flex; align-items: center; gap: 6px; }
+  .mini-select {
+    border: 1px solid transparent; background: transparent; color: var(--muted);
+    font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px; cursor: pointer;
+  }
+  .mini-select:hover { background: var(--hover); color: var(--text); }
+  .send-btn {
+    width: 30px; height: 30px; border-radius: 999px; border: none;
+    background: var(--focus); color: #fff; cursor: pointer; font-size: 14px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .send-btn.stop { background: var(--red); }
+  .send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Floating Right Tool Pill + Drawer */
+  .right-dock {
+    position: absolute; right: 12px; top: 18px; z-index: 15;
+    background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    padding: 4px; display: flex; flex-direction: column; gap: 2px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+  }
+  .drawer {
+    width: 380px; border-left: 1px solid var(--border); background: var(--sidebar);
+    display: none; flex-direction: column; height: 100%; overflow: hidden;
+  }
+  .drawer.open { display: flex; }
+  .drawer-head {
+    padding: 10px 14px; border-bottom: 1px solid var(--border); background: #fff;
+    display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 13px;
+  }
+  .drawer-body { flex: 1; overflow-y: auto; padding: 12px; }
+  .file-row {
+    padding: 4px 8px; border-radius: 6px; font-family: var(--mono); font-size: 12px;
+    cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .file-row:hover { background: var(--hover); }
+  .diff-line-add { background: #dafbe1; color: #116329; display: block; }
+  .diff-line-del { background: #ffebe9; color: #82071e; display: block; }
+
+  /* Modal (Settings / Automations) */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.28); z-index: 50;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: #fff; border-radius: 16px; border: 1px solid var(--border);
+    width: min(760px, 95vw); max-height: 86vh; display: flex; flex-direction: column;
+    box-shadow: 0 18px 48px rgba(0,0,0,0.14); overflow: hidden;
+  }
+  .modal-head { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .modal-body { padding: 16px 18px; overflow-y: auto; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .form-grid .full { grid-column: 1 / -1; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 500; }
+  .field input, .field select {
+    width: 100%; border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; font: inherit; font-size: 13px;
+  }
+  .btn {
+    border: 1px solid var(--border); background: #fff; color: var(--text);
+    border-radius: 999px; padding: 6px 13px; font: inherit; font-size: 12.5px;
+    font-weight: 500; cursor: pointer;
+  }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--focus); color: #fff; border-color: transparent; }
+  .btn.danger { background: var(--red); color: #fff; border-color: transparent; }
+  .status-note { font-size: 12px; padding: 8px 10px; border-radius: 8px; margin-top: 8px; background: var(--sidebar); }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #cbd5e1; border-top-color: var(--focus); border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Top Bar -->
+  <header class="topbar">
+    <div class="top-left">
+      <button id="toggleSidebarBtn" class="icon-btn" title="Toggle sidebar">☰</button>
+      <span style="font-weight:600; font-size:13.5px;">ADK Coder</span>
+      <span id="versionTag" style="font-size:11px; color:var(--muted);">v2.0.0</span>
+    </div>
+    <div class="top-center">
+      <div id="wsPill" class="ws-pill" title="Click to add/switch workspace">
+        <span>📁</span>
+        <span id="wsPillName">workspace</span>
+        <span id="wsPillBranch" class="branch-tag"></span>
+      </div>
+      <button id="runTestBtn" class="icon-btn" title="Run test command">▶</button>
+      <button id="openCodeBtn" class="icon-btn" title="Open workspace folder">↗</button>
+    </div>
+    <div class="top-right">
+      <button class="icon-btn" data-open-drawer="files" title="Files">📄</button>
+      <button class="icon-btn" data-open-drawer="diff" title="Git Diff">±</button>
+      <button class="icon-btn" data-open-drawer="inspector" title="Security / SBOM / Diagram">🛡</button>
+      <button class="icon-btn" data-open-drawer="terminal" title="Terminal">❯_</button>
+    </div>
+  </header>
+
+  <!-- Main 3-Pane Body -->
+  <div id="mainBody" class="body">
+    <!-- Left Sidebar -->
+    <aside class="sidebar">
+      <div class="side-top">
+        <button id="newSessionBtn" class="side-item"><span>＋ New Session</span><span class="kbd">⌘N</span></button>
+        <button id="automationsBtn" class="side-item"><span>⚡ Automations</span></button>
+        <button id="customizationsBtn" class="side-item"><span>⚙ Customizations</span></button>
+      </div>
+      <div class="side-sec-head">
+        <span>Sessions</span>
+        <div style="display:flex; gap:4px;">
+          <button id="addWsBtn" class="icon-btn" style="width:24px;height:24px;font-size:12px;" title="Open workspace folder">＋</button>
+          <button id="refreshBtn" class="icon-btn" style="width:24px;height:24px;font-size:12px;" title="Refresh">↻</button>
+        </div>
+      </div>
+      <div id="sessionsScroll" class="sessions-scroll"></div>
+    </aside>
+
+    <!-- Center Chat Stage -->
+    <section class="stage">
+      <div class="right-dock">
+        <button class="icon-btn" data-open-drawer="files" title="Files">📄</button>
+        <button class="icon-btn" data-open-drawer="diff" title="Git Diff">±</button>
+        <button class="icon-btn" data-open-drawer="inspector" title="Security / SBOM / Diagram">🛡</button>
+        <button class="icon-btn" data-open-drawer="terminal" title="Terminal">❯_</button>
+      </div>
+
+      <div id="chatScroll" class="chat-scroll">
+        <div id="chatInner" class="chat-inner"></div>
+      </div>
+
+      <div class="composer-area">
+        <div class="composer-box">
+          <textarea id="promptInput" rows="2" placeholder="Chat with ADK Coder... (type / for commands, @file to attach, Shift+Enter for newline)"></textarea>
+          <div class="composer-bar">
+            <div class="bar-left">
+              <button id="attachFileBtn" class="icon-btn" style="width:26px;height:26px;" title="Insert @file reference">＋</button>
+              <select id="modeSelect" class="mini-select" title="Execution mode">
+                <option value="ask">Ask Permissions</option>
+                <option value="auto-edit">Auto-Edit</option>
+                <option value="plan">Plan (Read-Only)</option>
+                <option value="full-auto">Full Auto</option>
+              </select>
+              <select id="profileSelect" class="mini-select" title="Switch LLM profile"></select>
+            </div>
+            <div class="bar-right">
+              <span id="modelLabel" style="font-size:11.5px; color:var(--muted);"></span>
+              <span id="ctxLabel" style="font-size:11.5px; color:var(--muted);"></span>
+              <button id="sendBtn" class="send-btn" title="Send (Enter)">↑</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Collapsible Drawer -->
+    <aside id="rightDrawer" class="drawer">
+      <div class="drawer-head">
+        <span id="drawerTitle">Files</span>
+        <button id="closeDrawerBtn" class="icon-btn" style="width:26px;height:26px;">✕</button>
+      </div>
+      <div id="drawerBody" class="drawer-body"></div>
+    </aside>
+  </div>
+</div>
+
+<!-- Modal for Customizations / Settings / Automations -->
+<div id="modalBg" class="modal-bg">
+  <div class="modal">
+    <div class="modal-head">
+      <strong id="modalTitle">Customizations</strong>
+      <button id="closeModalBtn" class="icon-btn">✕</button>
+    </div>
+    <div id="modalBody" class="modal-body"></div>
+  </div>
+</div>
+
+<script>
+let appState = null;
+let drawerKind = null;
+let liveTurn = null;
+let pendingApproval = null;
+
+function esc(v) {
+  return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+}
+
+function nowTime() {
+  return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+}
+
+function renderMarkdown(md) {
+  const src = String(md ?? '');
+  const blocks = [];
+  const replaced = src.replace(/```([\w+-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = blocks.length;
+    blocks.push(`<div class="code-wrap"><button class="copy-code-btn" data-copy-code="${idx}">Copy</button><pre data-code-idx="${idx}"><code>${esc(code)}</code></pre></div>`);
+    return `@@CODEBLOCK_${idx}@@`;
+  });
+  let html = esc(replaced)
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>').replace(/<\/ul>\s*<ul>/g, '');
+  html = html.split(/\n{2,}/).map(p => {
+    const t = p.trim();
+    if (!t) return '';
+    if (t.startsWith('<h') || t.startsWith('<ul') || t.startsWith('@@CODEBLOCK_')) return t;
+    return `<p>${t.replace(/\n/g, '<br/>')}</p>`;
+  }).join('');
+  blocks.forEach((b, i) => { html = html.replace(`@@CODEBLOCK_${i}@@`, b); });
+  return html;
+}
+
+async function apiGet(url) {
+  const res = await fetch(url);
+  return res.json();
+}
+async function apiPost(url, body) {
+  const res = await fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  const data = await res.json();
+  if (!res.ok && data.error) throw new Error(data.error);
+  return data;
+}
+
+function scrollChatBottom() {
+  const sc = document.getElementById('chatScroll');
+  sc.scrollTop = sc.scrollHeight;
+}
+
+function renderTopAndSidebar() {
+  if (!appState) return;
+  document.getElementById('versionTag').textContent = 'v' + appState.version;
+  document.getElementById('wsPillName').textContent = appState.workspace_name;
+  document.getElementById('wsPillBranch').textContent = appState.branch ? (appState.branch + (appState.dirty ? '*' : '')) : '';
+  document.getElementById('modeSelect').value = appState.mode || 'ask';
+  document.getElementById('modelLabel').textContent = appState.model;
+  const ctx = appState.context || {};
+  const limK = Math.round((ctx.limit || 0) / 1000);
+  document.getElementById('ctxLabel').textContent = `${ctx.label || 'Low'} · ${limK}K`;
+
+  const sendBtn = document.getElementById('sendBtn');
+  if (appState.busy || liveTurn) {
+    sendBtn.className = 'send-btn stop';
+    sendBtn.textContent = '■';
+    sendBtn.title = 'Stop generation';
+  } else {
+    sendBtn.className = 'send-btn';
+    sendBtn.textContent = '↑';
+    sendBtn.title = 'Send (Enter)';
+  }
+
+  // Profiles dropdown
+  const profSel = document.getElementById('profileSelect');
+  const profs = (appState.profiles && appState.profiles.profiles) || {};
+  const names = Object.keys(profs).sort();
+  profSel.innerHTML = `<option value="">Profile: ${esc(appState.profiles?.active || 'default')}</option>` +
+    names.map(n => `<option value="${esc(n)}" ${n === appState.profiles?.active ? 'selected' : ''}>${esc(n)}</option>`).join('');
+
+  // Sidebar workspaces & sessions
+  const sc = document.getElementById('sessionsScroll');
+  sc.innerHTML = (appState.workspaces || []).map(ws => {
+    const diffBadge = (ws.added || ws.deleted)
+      ? `<span class="diff-add">+${ws.added}</span> <span class="diff-del">-${ws.deleted}</span>`
+      : '';
+    const sessHtml = (ws.sessions || []).map(s => {
+      const isAct = ws.active && s.id === ws.active_session_id;
+      return `<div class="sess-row ${isAct ? 'active' : ''}" data-ws="${esc(ws.path)}" data-sess="${esc(s.id)}">
+        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.name)}</div>
+        <div class="sess-meta">${isAct ? diffBadge : ''} <span>${esc((s.updated_at || '').slice(0, 16).replace('T', ' '))}</span></div>
+      </div>`;
+    }).join('');
+    return `<div class="ws-group">
+      <div class="ws-group-head" data-select-ws="${esc(ws.path)}">
+        <span>📁 ${esc(ws.name)}</span>
+        <span style="font-size:11px;font-weight:500;">${diffBadge}</span>
+      </div>
+      ${sessHtml}
+    </div>`;
+  }).join('');
+
+  sc.querySelectorAll('[data-select-ws]').forEach(el => {
+    el.onclick = async () => {
+      appState = await apiPost('/api/workspace/select', { workspace: el.dataset.selectWs });
+      renderAll();
+    };
+  });
+  sc.querySelectorAll('[data-sess]').forEach(el => {
+    el.onclick = async () => {
+      await apiPost('/api/workspace/select', { workspace: el.dataset.ws });
+      const res = await apiPost('/api/session/select', { workspace: el.dataset.ws, session_id: el.dataset.sess });
+      appState = res.state;
+      renderAll();
+    };
+  });
+}
+
+function renderChat() {
+  if (!appState) return;
+  const container = document.getElementById('chatInner');
+  const history = appState.history || [];
+
+  if (!history.length && !liveTurn) {
+    container.innerHTML = `
+      <div class="empty-hero">
+        <h2>ADK Coder — ${esc(appState.workspace_name)}</h2>
+        <div>Model: <code>${esc(appState.model)}</code> · Mode: <strong>${esc(appState.mode)}</strong></div>
+        <div class="quick-chips">
+          <button class="chip" data-quick="/analyze">Analyze Project</button>
+          <button class="chip" data-quick="/debug">Debug Failure</button>
+          <button class="chip" data-quick="/security">Security &amp; SOLID</button>
+          <button class="chip" data-quick="/diagram">Architecture Diagram</button>
+          <button class="chip" data-quick="/pr-review">PR Code Review</button>
+          <button class="chip" data-quick="/sbom">Generate SBOM</button>
+        </div>
+      </div>`;
+    container.querySelectorAll('[data-quick]').forEach(b => {
+      b.onclick = () => sendMessage(b.dataset.quick);
+    });
+    return;
+  }
+
+  let html = '';
+  history.forEach((turn, idx) => {
+    if (turn.role === 'user') {
+      html += `<div class="msg-user-wrap"><div class="msg-user">${esc(turn.text)}</div></div>`;
+    } else {
+      html += `<div class="msg-agent">
+        <div class="md-body">${renderMarkdown(turn.text)}</div>
+        <div class="agent-footer">
+          <button class="icon-btn" style="width:24px;height:24px;" data-copy-turn="${idx}" title="Copy">📋</button>
+          <span>${esc(appState.model)}</span>
+        </div>
+      </div>`;
+    }
+  });
+
+  if (appState.edits_count > 0 && !liveTurn) {
+    html += `<div class="checkpoint-bar"><button id="restoreChkBtn" class="checkpoint-btn">↺ Restore Checkpoint (${appState.edits_count} edit${appState.edits_count === 1 ? '' : 's'})</button></div>`;
+  }
+
+  if (liveTurn) {
+    html += `<div class="msg-user-wrap"><div class="msg-user">${esc(liveTurn.userMessage)}</div><div class="msg-time">${esc(liveTurn.startedTime)}</div></div>`;
+    const stepsHtml = liveTurn.steps.length
+      ? `<details open><summary class="steps-summary"><span class="spinner"></span> ${liveTurn.steps.length} step(s) running...</summary>
+           <div class="steps-list">${liveTurn.steps.map(s => `<div>⚙ <code>${esc(s.name)}</code> ${esc(JSON.stringify(s.args || {})).slice(0, 100)}</div>`).join('')}</div>
+         </details>`
+      : `<div class="steps-summary"><span class="spinner"></span> Thinking...</div>`;
+    const thoughtHtml = liveTurn.thought ? `<div class="thought-box">${esc(liveTurn.thought)}</div>` : '';
+    const approvalHtml = pendingApproval
+      ? `<div class="approval-card">
+           <div><strong>Permission required:</strong> ${esc(pendingApproval.message)}</div>
+           <div style="display:flex;gap:8px;">
+             <button class="btn primary" data-approve="allow">Allow</button>
+             <button class="btn" data-approve="always">Always (session)</button>
+             <button class="btn danger" data-approve="deny">Deny</button>
+           </div>
+         </div>`
+      : '';
+    html += `<div class="msg-agent">
+      ${stepsHtml}
+      ${thoughtHtml}
+      ${approvalHtml}
+      ${liveTurn.text ? `<div class="md-body">${renderMarkdown(liveTurn.text)}</div>` : ''}
+    </div>`;
+  }
+
+  container.innerHTML = html;
+
+  container.querySelectorAll('[data-copy-code]').forEach(btn => {
+    btn.onclick = () => {
+      const pre = container.querySelector(`pre[data-code-idx="${btn.dataset.copyCode}"]`);
+      if (pre) navigator.clipboard?.writeText(pre.textContent || '');
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+    };
+  });
+  container.querySelectorAll('[data-copy-turn]').forEach(btn => {
+    btn.onclick = () => {
+      const turn = history[Number(btn.dataset.copyTurn)];
+      if (turn) navigator.clipboard?.writeText(turn.text || '');
+    };
+  });
+  const chkBtn = document.getElementById('restoreChkBtn');
+  if (chkBtn) {
+    chkBtn.onclick = async () => {
+      const r = await apiPost('/api/checkpoint/undo', { workspace: appState.workspace, count: 1 });
+      appState = r.state;
+      renderAll();
+    };
+  }
+  container.querySelectorAll('[data-approve]').forEach(btn => {
+    btn.onclick = async () => {
+      if (!pendingApproval) return;
+      const id = pendingApproval.id;
+      pendingApproval = null;
+      await apiPost('/api/chat/approve', { id, decision: btn.dataset.approve });
+      renderChat();
+    };
+  });
+  scrollChatBottom();
+}
+
+function renderAll() {
+  renderTopAndSidebar();
+  renderChat();
+  if (drawerKind) loadDrawer(drawerKind);
+}
+
+async function sendMessage(overrideText) {
+  const input = document.getElementById('promptInput');
+  const msg = (overrideText ?? input.value).trim();
+  if (!msg) return;
+  if (!overrideText) input.value = '';
+  liveTurn = { userMessage: msg, startedTime: nowTime(), steps: [], thought: '', text: '' };
+  renderAll();
+  try {
+    await apiPost('/api/chat/send', { workspace: appState.workspace, message: msg });
+  } catch (err) {
+    liveTurn = null;
+    alert(String(err));
+    renderAll();
+  }
+}
+
+async function loadDrawer(kind) {
+  drawerKind = kind;
+  const drawer = document.getElementById('rightDrawer');
+  drawer.classList.add('open');
+  const title = document.getElementById('drawerTitle');
+  const body = document.getElementById('drawerBody');
+  const ws = appState.workspace;
+
+  if (kind === 'files') {
+    title.textContent = 'Workspace Files';
+    const d = await apiGet('/api/files?workspace=' + encodeURIComponent(ws));
+    body.innerHTML = `<input id="fileFilter" placeholder="Filter files..." style="width:100%;padding:6px 9px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;" />
+      <div id="fileList"></div><pre id="filePreview" style="display:none;margin-top:10px;padding:10px;background:#fff;border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:420px;font-family:var(--mono);font-size:11.5px;"></pre>`;
+    const renderList = (q) => {
+      const fl = (d.files || []).filter(f => !q || f.toLowerCase().includes(q.toLowerCase())).slice(0, 150);
+      document.getElementById('fileList').innerHTML = fl.map(f => `<div class="file-row" data-fpath="${esc(f)}">${esc(f)}</div>`).join('');
+      document.querySelectorAll('[data-fpath]').forEach(row => {
+        row.onclick = async () => {
+          const r = await apiGet(`/api/file?workspace=${encodeURIComponent(ws)}&path=${encodeURIComponent(row.dataset.fpath)}`);
+          const pre = document.getElementById('filePreview');
+          pre.style.display = 'block';
+          pre.textContent = r.content || '';
+        };
+      });
+    };
+    renderList('');
+    document.getElementById('fileFilter').oninput = (e) => renderList(e.target.value);
+  } else if (kind === 'diff') {
+    title.textContent = 'Git Diff';
+    const d = await apiGet('/api/diff?workspace=' + encodeURIComponent(ws));
+    const colored = (d.diff || 'No uncommitted changes.').split('\n').map(ln => {
+      if (ln.startsWith('+') && !ln.startsWith('+++')) return `<span class="diff-line-add">${esc(ln)}</span>`;
+      if (ln.startsWith('-') && !ln.startsWith('---')) return `<span class="diff-line-del">${esc(ln)}</span>`;
+      return esc(ln) + '\n';
+    }).join('');
+    body.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span><span class="diff-add">+${d.added || 0}</span> <span class="diff-del">-${d.deleted || 0}</span></span>
+        <button id="reviewDiffBtn" class="btn primary">PR Review</button>
+      </div>
+      <pre style="margin:0;padding:10px;background:#fff;border:1px solid var(--border);border-radius:8px;overflow:auto;font-family:var(--mono);font-size:11.5px;">${colored}</pre>`;
+    document.getElementById('reviewDiffBtn').onclick = () => sendMessage('/pr-review');
+  } else if (kind === 'inspector') {
+    title.textContent = 'Inspector (Offline)';
+    body.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+        <button id="insSecBtn" class="btn primary">Security &amp; SOLID</button>
+        <button id="insDiagBtn" class="btn">Diagram &amp; APIs</button>
+        <button id="insSbomBtn" class="btn">SBOM</button>
+      </div>
+      <div id="insOut" style="font-size:12.5px;color:var(--muted);">Click a tool above to inspect this workspace offline.</div>`;
+    document.getElementById('insSecBtn').onclick = async () => {
+      const r = await apiPost('/api/tools/security', { workspace: ws });
+      const fs = r.security?.findings || [];
+      document.getElementById('insOut').innerHTML = fs.length
+        ? fs.slice(0, 40).map(f => `<div style="padding:6px 0;border-bottom:1px solid var(--border);"><strong>[${esc(f.severity)}]</strong> <code>${esc(f.file)}:${f.line}</code><br/>${esc(f.message)}</div>`).join('')
+        : 'No security or SOLID issues found.';
+    };
+    document.getElementById('insDiagBtn').onclick = async () => {
+      const r = await apiPost('/api/tools/diagram', { workspace: ws });
+      document.getElementById('insOut').innerHTML = `<div><strong>${r.files_count}</strong> files · <strong>${(r.routes||[]).length}</strong> routes · <strong>${(r.cycles||[]).length}</strong> cycles</div>
+        <pre style="white-space:pre-wrap;background:#fff;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:8px;">${esc(r.mermaid || '')}</pre>`;
+    };
+    document.getElementById('insSbomBtn').onclick = async () => {
+      const r = await apiPost('/api/tools/sbom', { workspace: ws, fmt: 'cyclonedx' });
+      document.getElementById('insOut').innerHTML = `<div><strong>${r.total}</strong> dependencies (${esc(r.format)})</div>` +
+        (r.components || []).slice(0, 60).map(c => `<div style="padding:4px 0;border-bottom:1px solid var(--border);"><code>${esc(c.name)}</code> ${esc(c.version)} · ${esc(c.license)}</div>`).join('');
+    };
+  } else if (kind === 'terminal') {
+    title.textContent = 'Workspace Terminal';
+    body.innerHTML = `<div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input id="termCmd" placeholder="e.g. pytest -q or mvn -B test" value="${esc(appState.test_command || '')}" style="flex:1;padding:6px 9px;border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:12px;" />
+        <button id="termRunBtn" class="btn primary">Run</button>
+      </div>
+      <div id="termActionBar" style="margin-bottom:8px;"></div>
+      <pre id="termOut" style="margin:0;padding:10px;background:#0d1117;color:#e6edf3;border-radius:8px;overflow:auto;min-height:220px;max-height:520px;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;">Ready.</pre>`;
+    const runCmd = async () => {
+      const cmd = document.getElementById('termCmd').value.trim();
+      if (!cmd) return;
+      document.getElementById('termOut').textContent = 'Running: ' + cmd + '...';
+      const r = await apiPost('/api/terminal/run', { workspace: ws, command: cmd });
+      document.getElementById('termOut').textContent = `Exit ${r.exit_code}\n\n${r.output || ''}`;
+      document.getElementById('termActionBar').innerHTML = r.ok
+        ? '<span class="diff-add">✓ Command passed</span>'
+        : `<button id="debugFailBtn" class="btn danger">Debug &amp; Fix with Agent</button>`;
+      const db = document.getElementById('debugFailBtn');
+      if (db) db.onclick = () => sendMessage(`/debug --cmd "${cmd}"`);
+    };
+    document.getElementById('termRunBtn').onclick = runCmd;
+    document.getElementById('termCmd').onkeydown = (e) => { if (e.key === 'Enter') runCmd(); };
+  }
+}
+
+async function openCustomizationsModal() {
+  const modalBg = document.getElementById('modalBg');
+  document.getElementById('modalTitle').textContent = 'Customizations — Provider Settings & Profiles';
+  const body = document.getElementById('modalBody');
+  const st = await apiGet('/api/state?workspace=' + encodeURIComponent(appState.workspace));
+  const prof = await apiGet('/api/profiles');
+  const profNames = Object.keys(prof.profiles || {}).sort();
+
+  body.innerHTML = `
+    <div class="form-grid">
+      <div class="field"><label>Provider</label>
+        <select id="cProv">${['openai-compatible','ollama','gemini','anthropic','openrouter','groq'].map(p => `<option ${p===st.provider?'selected':''}>${p}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Execution Mode</label>
+        <select id="cMode">${['ask','auto-edit','plan','full-auto'].map(m => `<option ${m===st.mode?'selected':''}>${m}</option>`).join('')}</select>
+      </div>
+      <div class="field full"><label>Base URL</label><input id="cBase" value="${esc(st.base_url || '')}" placeholder="https://.../v1 or http://127.0.0.1:11434" /></div>
+      <div class="field full"><label>Model ID</label><input id="cModel" value="${esc(st.model || '')}" /></div>
+      <div class="field"><label>API Key</label><input id="cKey" type="password" value="${esc(st.api_key || '')}" /></div>
+      <div class="field"><label>Endpoint Token (optional)</label><input id="cTok" type="password" value="${esc(st.api_token || '')}" /></div>
+      <div class="field full"><label>Test Command</label><input id="cTest" value="${esc(st.test_command || '')}" placeholder="pytest -q or mvn -B test" /></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button id="cTestBtn" class="btn">Test Connection</button>
+      <button id="cSaveBtn" class="btn primary">Save Settings</button>
+    </div>
+    <div id="cStatus" class="status-note" style="display:none;"></div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;" />
+    <div style="font-weight:600;margin-bottom:8px;">Saved Profiles &amp; Auto-Fallback</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <input id="pName" placeholder="Profile name (e.g. LocalOrnith)" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:8px;" />
+      <button id="pSaveBtn" class="btn">Save Profile</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <select id="pFbSel" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:8px;">
+        <option value="">Auto-fallback: Disabled</option>
+        ${profNames.map(n => `<option value="${esc(n)}" ${n===prof.fallback?'selected':''}>Fallback: ${esc(n)}</option>`).join('')}
+      </select>
+      <button id="pFbBtn" class="btn">Set Fallback</button>
+    </div>`;
+
+  const getForm = () => ({
+    provider: document.getElementById('cProv').value,
+    mode: document.getElementById('cMode').value,
+    base_url: document.getElementById('cBase').value.trim(),
+    model: document.getElementById('cModel').value.trim(),
+    api_key: document.getElementById('cKey').value.trim(),
+    api_token: document.getElementById('cTok').value.trim(),
+    test_command: document.getElementById('cTest').value.trim(),
+    workspace: appState.workspace,
+    sync_workspace: true,
+  });
+  const note = (txt) => { const el = document.getElementById('cStatus'); el.style.display = 'block'; el.textContent = txt; };
+
+  document.getElementById('cTestBtn').onclick = async () => {
+    note('Testing connection...');
+    const r = await apiPost('/api/test', getForm());
+    note(r.ok ? `Connected (${r.latency_ms} ms): ${r.reply}` : `Failed: ${r.message} ${r.hint || ''}`);
+  };
+  document.getElementById('cSaveBtn').onclick = async () => {
+    const r = await apiPost('/api/save', getForm());
+    note(r.ok ? `Saved ${r.model}.` : `Error: ${r.error}`);
+    appState = await apiGet('/api/bootstrap');
+    renderAll();
+  };
+  document.getElementById('pSaveBtn').onclick = async () => {
+    const name = document.getElementById('pName').value.trim();
+    if (!name) return;
+    await apiPost('/api/profiles/save', { ...getForm(), name });
+    appState = await apiGet('/api/bootstrap');
+    renderAll();
+    openCustomizationsModal();
+  };
+  document.getElementById('pFbBtn').onclick = async () => {
+    await apiPost('/api/profiles/fallback', { name: document.getElementById('pFbSel').value });
+    appState = await apiGet('/api/bootstrap');
+    renderAll();
+    note('Updated fallback profile.');
+  };
+  modalBg.classList.add('open');
+}
+
+function openAutomationsModal() {
+  const modalBg = document.getElementById('modalBg');
+  document.getElementById('modalTitle').textContent = 'Automations & Agent Workflows';
+  const actions = [
+    ['/debug', 'Multi-Sub-Agent Debugger', 'Parse logs/failures -> Root Cause -> Surgical Fix -> Verify/Rollback'],
+    ['/analyze', 'Application Analysis', 'Generate docs/ANALYSIS.md with architecture, tech debt & findings'],
+    ['/pr-review', 'Branch / PR Reviewer', 'Review git diff for bugs, security, SOLID & test gaps'],
+    ['/testgen', 'Unit Test Generator', 'Generate passing unit & edge-case tests for a file'],
+    ['/security', 'Security & SOLID Scan', 'Offline SAST, secrets scanner, and SOLID complexity metrics'],
+    ['/diagram', 'Architecture & API Map', 'Deterministic Mermaid dependency graph, cycles & HTTP routes'],
+    ['/resolve-conflicts', 'Merge Conflict Resolver', 'Cleanly merge Git conflict hunks and verify tests'],
+    ['/sbom', 'Generate SBOM', 'Export CycloneDX / SPDX Software Bill of Materials'],
+  ];
+  document.getElementById('modalBody').innerHTML = actions.map(([cmd, title, desc]) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+      <div><strong>${esc(title)}</strong> <code>${esc(cmd)}</code><div style="font-size:12px;color:var(--muted);">${esc(desc)}</div></div>
+      <button class="btn primary" data-run-auto="${esc(cmd)}">Run</button>
+    </div>`).join('');
+  document.querySelectorAll('[data-run-auto]').forEach(b => {
+    b.onclick = () => {
+      modalBg.classList.remove('open');
+      const cmd = b.dataset.runAuto;
+      if (cmd === '/testgen') {
+        const p = document.getElementById('promptInput');
+        p.value = '/testgen ';
+        p.focus();
+      } else {
+        sendMessage(cmd);
+      }
+    };
+  });
+  modalBg.classList.add('open');
+}
+
+// Wire controls
+document.getElementById('toggleSidebarBtn').onclick = () => document.getElementById('mainBody').classList.toggle('sidebar-collapsed');
+document.getElementById('closeDrawerBtn').onclick = () => { drawerKind = null; document.getElementById('rightDrawer').classList.remove('open'); };
+document.getElementById('closeModalBtn').onclick = () => document.getElementById('modalBg').classList.remove('open');
+document.getElementById('customizationsBtn').onclick = openCustomizationsModal;
+document.getElementById('automationsBtn').onclick = openAutomationsModal;
+document.getElementById('openCodeBtn').onclick = () => apiPost('/api/tools/open-external', { workspace: appState.workspace, target: 'folder' });
+document.getElementById('runTestBtn').onclick = () => loadDrawer('terminal');
+document.getElementById('refreshBtn').onclick = async () => { appState = await apiGet('/api/bootstrap'); renderAll(); };
+document.getElementById('newSessionBtn').onclick = async () => {
+  const r = await apiPost('/api/session/new', { workspace: appState.workspace });
+  appState = r.state;
+  renderAll();
+};
+
+const pickWs = async () => {
+  const r = await apiPost('/api/workspace/pick', {});
+  if (r.ok && r.state) {
+    appState = r.state;
+    renderAll();
+  } else if (!r.cancelled) {
+    const manual = prompt('Enter full workspace folder path:', appState.workspace || '');
+    if (manual && manual.trim()) {
+      appState = await apiPost('/api/workspace/select', { workspace: manual.trim() });
+      renderAll();
+    }
+  }
+};
+document.getElementById('addWsBtn').onclick = pickWs;
+document.getElementById('wsPill').onclick = pickWs;
+
+document.querySelectorAll('[data-open-drawer]').forEach(btn => {
+  btn.onclick = () => {
+    const k = btn.dataset.openDrawer;
+    if (drawerKind === k) { drawerKind = null; document.getElementById('rightDrawer').classList.remove('open'); }
+    else loadDrawer(k);
+  };
+});
+
+document.getElementById('modeSelect').onchange = async (e) => {
+  const r = await apiPost('/api/mode', { workspace: appState.workspace, mode: e.target.value });
+  appState = r.state;
+  renderAll();
+};
+
+document.getElementById('profileSelect').onchange = async (e) => {
+  if (!e.target.value) return;
+  await apiPost('/api/profiles/use', { name: e.target.value, workspace: appState.workspace });
+  appState = await apiGet('/api/bootstrap');
+  renderAll();
+};
+
+document.getElementById('attachFileBtn').onclick = async () => {
+  const d = await apiGet('/api/files?workspace=' + encodeURIComponent(appState.workspace));
+  const choice = prompt('Insert @file reference (e.g. ' + ((d.files || []).slice(0, 3).join(', ')) + '):');
+  if (choice && choice.trim()) {
+    const inp = document.getElementById('promptInput');
+    inp.value = (inp.value ? inp.value + ' ' : '') + '@' + choice.trim() + ' ';
+    inp.focus();
+  }
+};
+
+document.getElementById('sendBtn').onclick = () => {
+  if (appState?.busy || liveTurn) apiPost('/api/chat/abort', {});
+  else sendMessage();
+};
+
+document.getElementById('promptInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    if (!appState?.busy && !liveTurn) sendMessage();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+    e.preventDefault();
+    document.getElementById('newSessionBtn').click();
+  }
+});
+
+// Live SSE Event Stream
+function connectEvents() {
+  const es = new EventSource('/api/events');
+  es.onmessage = (msg) => {
+    try {
+      const ev = JSON.parse(msg.data);
+      if (ev.type === 'thought' && liveTurn) {
+        liveTurn.thought += ev.text;
+        renderChat();
+      } else if (ev.type === 'text' && liveTurn) {
+        liveTurn.text += ev.text;
+        renderChat();
+      } else if (ev.type === 'tool_call' && liveTurn) {
+        liveTurn.steps.push({ name: ev.name, args: ev.args });
+        renderChat();
+      } else if (ev.type === 'approval_request') {
+        pendingApproval = { id: ev.id, message: ev.message };
+        renderChat();
+      } else if (ev.type === 'turn_done' || ev.type === 'turn_error') {
+        liveTurn = null;
+        pendingApproval = null;
+        if (ev.state) appState = ev.state;
+        if (ev.type === 'turn_error') alert('Agent error: ' + ev.error);
+        renderAll();
+      }
+    } catch (_) {}
+  };
+  es.onerror = () => { setTimeout(connectEvents, 2000); };
+}
+
+(async function boot() {
+  appState = await apiGet('/api/bootstrap');
+  renderAll();
+  connectEvents();
+})();
+</script>
+</body>
+</html>

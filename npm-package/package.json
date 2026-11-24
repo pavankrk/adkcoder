@@ -1,11 +1,12 @@
 {
   "name": "adk-coder",
-  "version": "1.0.0",
-  "description": "Interactive Google ADK coding assistant CLI & Settings UI (npm/npx wrapper)",
+  "version": "2.0.0",
+  "description": "Interactive Google ADK coding assistant CLI & Native Desktop App (npm/npx wrapper)",
   "license": "Apache-2.0",
   "bin": {
     "adk-coder": "bin/adk-coder.js",
-    "adk-coder-config": "bin/adk-coder-config.js"
+    "adk-coder-config": "bin/adk-coder-config.js",
+    "adk-coder-app": "bin/adk-coder-app.js"
   },
   "files": [
     "bin/",

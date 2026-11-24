@@ -348,18 +348,34 @@ def main(argv: list[str] | None = None) -> int:
         "--config", dest="open_config", action="store_true",
         help="Launch the lightweight Web Settings UI to configure LLM models and test connectivity.",
     )
+    parser.add_argument(
+        "--app", dest="open_app", action="store_true",
+        help="Launch the standalone native ADK Coder Desktop Agent IDE window (pywebview).",
+    )
     parser.add_argument("--install-completion", choices=["bash", "zsh"])
     parser.add_argument("request", nargs=argparse.REMAINDER)
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    raw_argv = [("--" + a[1:]) if a in {"-app", "-config"} else a for a in raw_argv]
+    args = parser.parse_args(raw_argv)
     if args.request[:1] == ["--"]:
+        args.request = args.request[1:]
+    if args.request and args.request[0] == "app" and not args.print_mode and not args.json_output:
+        args.open_app = True
+        args.request = args.request[1:]
+    elif args.request and args.request[0] == "config" and not args.print_mode and not args.json_output:
+        args.open_config = True
         args.request = args.request[1:]
     try:
         from .config_ui import load_global_env
         from .config_ui import main as config_main
 
         load_global_env()
+        if args.open_app:
+            from .desktop_app import main as desktop_main
+
+            return desktop_main(["--workspace", str(args.workspace), *args.request])
         if args.open_config:
-            return config_main(["--workspace", str(args.workspace)])
+            return config_main(["--workspace", str(args.workspace), *args.request])
         if args.install_completion:
             install(args.install_completion)
             return 0

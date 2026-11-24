@@ -4,19 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "adk-coder"
-version = "1.0.0"
-description = "Interactive ADK coding assistant and workspace CLI"
+version = "2.0.0"
+description = "Interactive ADK coding assistant CLI and native desktop Agent IDE"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["google-adk>=2.15,<3", "rich>=13", "prompt-toolkit>=3.0.40"]
 
 [project.optional-dependencies]
 local = ["litellm>=1.67"]
+desktop = ["pywebview>=5.3"]
 dev = ["pytest>=8", "ruff>=0.3"]
 
 [project.scripts]
 adk-coder = "adk_coder.cli:main"
 adk-coder-config = "adk_coder.config_ui:main"
+adk-coder-app = "adk_coder.desktop_app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -25,4 +27,4 @@ where = ["src"]
 "share/adk-coder/completions" = ["completions/adk-coder.bash", "completions/_adk-coder"]
 
 [tool.setuptools.package-data]
-adk_coder = ["templates/**/*.tmpl"]
+adk_coder = ["templates/**/*.tmpl", "desktop_assets/*.html"]
