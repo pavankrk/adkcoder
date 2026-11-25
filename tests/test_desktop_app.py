@@ -191,6 +191,31 @@ def test_desktop_controller_chat_streaming_and_approval(tmp_path, monkeypatch):
     assert done4 is not None and done4["state"]["busy"] is False
     assert any(t["role"] == "user" and t["text"] == "/mode" for t in done4["state"]["history"])
 
+    # Test Stop forcefully interrupts a blocking synchronous subprocess (like a long test run)
+    import time
+
+    def _run_blocking_turn(model, instruction, prompt, tools=(), **kwargs):
+        time.sleep(10)
+        return "too-late"
+
+    async def blocking_generate(model, instruction, prompt, tools=(), **kwargs):
+        return _run_blocking_turn(model, instruction, prompt, tools=tools, **kwargs)
+
+    monkeypatch.setattr(harness_mod, "generate", blocking_generate)
+    st5, _, _ = dispatch_desktop_request(ctrl, "POST", "/api/chat/send", {"message": "slow sync"})
+    assert st5 == 200
+    for _ in range(10):
+        ev = q.get(timeout=3)
+        if ev["type"] == "turn_start":
+            break
+    t0 = time.monotonic()
+    st_stop5, _, stop5_raw = dispatch_desktop_request(ctrl, "POST", "/api/chat/abort", {})
+    elapsed_stop = time.monotonic() - t0
+    stop5 = json.loads(stop5_raw)
+    assert st_stop5 == 200 and stop5["ok"] is True and stop5["busy"] is False
+    assert stop5["state"]["busy"] is False
+    assert elapsed_stop < 3.0  # Must unlock immediately even if worker is stuck in a blocking call!
+
 
 def test_cli_app_shortcuts(tmp_path, monkeypatch):
     calls: list[list[str]] = []

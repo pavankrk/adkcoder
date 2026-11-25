@@ -303,3 +303,32 @@ def test_fixer_retries_with_feedback_and_fuzzy_match(tmp_path, monkeypatch):
     assert "previous_attempt_error" in seen_prompts[1]
     assert "0 audit findings remaining" in res
     assert "return 0 if b == 0 else a / b" in target.read_text(encoding="utf8")
+
+
+def test_debug_autodetects_project_test_cmd_and_latest_log(tmp_path):
+    from adk_coder.debugger import (
+        _autodetect_debug_command,
+        _autodetect_latest_log,
+        _collect_log_input,
+    )
+
+    py_ws = tmp_path / "py_proj"
+    py_ws.mkdir()
+    (py_ws / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf8")
+    assert _autodetect_debug_command(py_ws) == "pytest -q"
+
+    mvn_ws = tmp_path / "mvn_proj"
+    mvn_ws.mkdir()
+    (mvn_ws / "pom.xml").write_text("<project/>", encoding="utf8")
+    assert _autodetect_debug_command(mvn_ws) == "mvn -B test"
+
+    log_ws = tmp_path / "log_proj"
+    log_ws.mkdir()
+    (log_ws / "logs").mkdir()
+    err_log = log_ws / "logs" / "crash.log"
+    err_log.write_text("ERROR boom\n", encoding="utf8")
+    assert _autodetect_latest_log(log_ws) == err_log
+
+    h = AgentHarness(log_ws, approve=lambda _: True)
+    raw, label, rc = _collect_log_input(h, {"cmd": None, "targets": []})
+    assert "ERROR boom" in raw and label == "logs/crash.log" and rc is None

@@ -6,6 +6,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
 from .scrubber import scrub
@@ -204,8 +205,29 @@ async def run_agent(
     answer: list[str] = []
     streamed_chunks: list[str] = []
     fallback_thoughts: list[str] = []
+    aiter = runner.run_async(**run_params).__aiter__()
+    abort_waiter: asyncio.Task[bool] | None = (
+        asyncio.create_task(abort_signal.wait()) if abort_signal is not None else None
+    )
     try:
-        async for event in runner.run_async(**run_params):
+        while True:
+            if abort_signal is not None and abort_signal.is_set():
+                break
+            next_task: asyncio.Task[Any] = asyncio.create_task(aiter.__anext__())
+            if abort_waiter is not None:
+                done, _ = await asyncio.wait(
+                    {next_task, abort_waiter}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if abort_waiter in done:
+                    next_task.cancel()
+                    with suppress(asyncio.CancelledError, StopAsyncIteration, Exception):
+                        await next_task
+                    break
+            try:
+                event = await next_task
+            except StopAsyncIteration:
+                break
+
             if abort_signal is not None and abort_signal.is_set():
                 break
 
@@ -269,7 +291,10 @@ async def run_agent(
             abort_signal.set()
         raise
     finally:
-        await runner.close()
+        if abort_waiter is not None and not abort_waiter.done():
+            abort_waiter.cancel()
+        with suppress(TimeoutError, asyncio.CancelledError, Exception):
+            await asyncio.wait_for(runner.close(), timeout=2.0)
 
     if abort_signal is not None and abort_signal.is_set():
         partial_text = "".join(streamed_chunks).strip()

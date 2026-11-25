@@ -18,6 +18,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import suppress
 from pathlib import Path
 
 from .changelog import record
@@ -110,6 +111,23 @@ class WorkspaceTools:
         self.hooks = hooks
         self.always_scopes: set[str] = set()
         self._edit_history_path = self.root / ".agent" / "edit_history.json"
+        self._active_proc: subprocess.Popen[str] | None = None
+        self._abort_flag = False
+
+    def abort_running(self) -> None:
+        """Immediately terminate any active shell subprocess spawned by this workspace."""
+        self._abort_flag = True
+        proc = self._active_proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=1.0)
+            except (OSError, subprocess.TimeoutExpired):
+                with suppress(OSError):
+                    proc.kill()
+
+    def reset_abort(self) -> None:
+        self._abort_flag = False
 
     @property
     def approve(self):
@@ -690,25 +708,38 @@ class WorkspaceTools:
             else:
                 exec_args = tokens
             exec_args = self._seatbelt_wrap(exec_args)
+            self._abort_flag = False
+            timeout_lim = min(max(int(timeout_seconds), 1), 600)
             with spinning(f"Running {Path(tokens[0]).name}"):
-                result = subprocess.run(
+                proc = subprocess.Popen(
                     exec_args,
                     cwd=self.root,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
                     errors="replace",
-                    timeout=min(max(int(timeout_seconds), 1), 600),
-                    check=False,
                 )
-            output = scrub((result.stdout + result.stderr)[-32000:])
+                self._active_proc = proc
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout_lim)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.communicate()
+                    raise
+                finally:
+                    if self._active_proc is proc:
+                        self._active_proc = None
+            if self._abort_flag:
+                return "Command aborted by user."
+            output = scrub((stdout + stderr)[-32000:])
             record(
                 self.root / ".agent",
                 "RESULT",
-                f"{cleaned} (exit {result.returncode})",
+                f"{cleaned} (exit {proc.returncode})",
             )
             if self.hooks is not None:
                 self.hooks.run("post_shell", command=cleaned)
-            return format_result(cleaned, result.returncode, output)
+            return format_result(cleaned, proc.returncode, output)
         except subprocess.TimeoutExpired:
             return "Command timed out."
         except OSError as exc:

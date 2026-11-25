@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import subprocess
 from collections import Counter
@@ -27,7 +28,7 @@ from .audit import response_json
 from .changelog import record
 from .scrubber import scrub
 from .spinner import spinning
-from .tools import atomic_write
+from .tools import IGNORED_DIRS, _is_protected_part, atomic_write
 from .ui import console
 
 DEBUG_REPORT_FILE = "DEBUG_REPORT.md"
@@ -662,6 +663,56 @@ def _parse_debug_args(args: list[str]) -> dict[str, Any]:
     return opts
 
 
+def _autodetect_debug_command(root: Path) -> str:
+    """Infer a sensible build/test command when workspace test_command is not configured."""
+    if (root / "pom.xml").is_file():
+        return "mvn -B test"
+    if (root / "gradlew").is_file():
+        return "./gradlew test"
+    if (root / "build.gradle").is_file() or (root / "build.gradle.kts").is_file():
+        return "gradle test"
+    pkg_json = root / "package.json"
+    if pkg_json.is_file():
+        try:
+            data = json.loads(pkg_json.read_text(encoding="utf8"))
+            if isinstance(data, dict) and isinstance(data.get("scripts"), dict) and data["scripts"].get("test"):
+                return "npm test"
+        except (OSError, json.JSONDecodeError):
+            pass
+    if (root / "go.mod").is_file():
+        return "go test ./..."
+    if (root / "Cargo.toml").is_file():
+        return "cargo test"
+    if (
+        (root / "pyproject.toml").is_file()
+        or (root / "pytest.ini").is_file()
+        or (root / "tests").is_dir()
+    ):
+        return "pytest -q"
+    return ""
+
+
+def _autodetect_latest_log(root: Path) -> Path | None:
+    """Return the most recently modified .log file in the workspace (excluding ignored dirs)."""
+    candidates: list[tuple[float, Path]] = []
+    for parent, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in IGNORED_DIRS and not _is_protected_part(d)]
+        for name in files:
+            if not name.lower().endswith(".log") or _is_protected_part(name):
+                continue
+            p = Path(parent, name)
+            try:
+                st = p.stat()
+                if st.st_size > 0:
+                    candidates.append((st.st_mtime, p))
+            except OSError:
+                continue
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
 def _collect_log_input(h, opts: dict[str, Any]) -> tuple[str, str, int | None]:
     """Return (raw_log_text, source_label, command_exit_code)."""
     if opts["cmd"]:
@@ -695,19 +746,26 @@ def _collect_log_input(h, opts: dict[str, Any]) -> tuple[str, str, int | None]:
                 labels.append("inline")
         return "\n\n".join(combined_chunks), ", ".join(dict.fromkeys(labels)), None
 
-    # No explicit file or --cmd: try configured test_command if present
-    test_cmd = h.test_command()
+    # No explicit file or --cmd: try configured test_command or auto-detected project test command
+    test_cmd = h.test_command() or _autodetect_debug_command(h.root)
     if test_cmd:
-        with spinning(f"Running test_command to capture failure: {test_cmd}"):
+        with spinning(f"Running command to capture failure: {test_cmd}"):
             output = h.tools.run_shell_command(test_cmd, 600)
         parts = output.split(None, 2)
         exit_code = int(parts[1]) if len(parts) >= 2 and parts[0] == "Exit" and parts[1].lstrip("-").isdigit() else None
         opts["cmd"] = test_cmd
         return output, f"cmd:{test_cmd}", exit_code
 
+    # Fall back to the most recent workspace .log file if present
+    latest_log = _autodetect_latest_log(h.root)
+    if latest_log is not None:
+        data = latest_log.read_text(encoding="utf8", errors="replace")
+        rel = latest_log.relative_to(h.root).as_posix()
+        return f"=== {rel} ===\n{data}", rel, None
+
     raise ValueError(
-        "Provide a log file, error text, or --cmd <command>. "
-        "Example: `/debug logs/app.log` or `/debug --cmd \"pytest\"`"
+        "Provide a log file, pasted error text, or --cmd <command>. "
+        "Example: `/debug logs/app.log`, `/debug --cmd \"pytest\"`, or `/debug \"NullPointerException...\"`"
     )
 
 

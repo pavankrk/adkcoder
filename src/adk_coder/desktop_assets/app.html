@@ -1208,7 +1208,12 @@ function renderChat() {
           <button class="chip" data-quick="/sbom">Generate SBOM</button>
         </div>
       </div>`;
-    container.querySelectorAll('[data-quick]').forEach(b => { b.onclick = () => sendMessage(b.dataset.quick); });
+    container.querySelectorAll('[data-quick]').forEach(b => {
+      b.onclick = () => {
+        if (b.dataset.quick === '/debug') openDebugModal();
+        else sendMessage(b.dataset.quick);
+      };
+    });
     return;
   }
 
@@ -1389,6 +1394,12 @@ async function sendMessage(overrideText) {
   const raw = (overrideText ?? input.value).trim();
   const msg = overrideText ? raw : buildFinalPrompt(raw);
   if (!msg) return;
+  if (!overrideText && msg.toLowerCase() === '/debug') {
+    input.value = '';
+    closeAutocomplete();
+    openDebugModal();
+    return;
+  }
   if (!overrideText) {
     input.value = '';
     attachedItems = [];
@@ -2240,11 +2251,78 @@ function openAutomationsModal(activeTab = 'workflows') {
     b.onclick = () => {
       modalBg.classList.remove('open');
       const cmd = b.dataset.runAuto;
-      if (cmd === '/testgen') { const p = document.getElementById('promptInput'); p.value = '/testgen '; p.focus(); }
+      if (cmd === '/debug') { openDebugModal(); }
+      else if (cmd === '/testgen') { const p = document.getElementById('promptInput'); p.value = '/testgen '; p.focus(); }
       else sendMessage(cmd);
     };
   });
   modalBg.classList.add('open');
+}
+
+/* ---- Interactive Multi-Agent Debug Launcher Modal ---- */
+async function openDebugModal() {
+  const modalBg = document.getElementById('modalBg');
+  document.getElementById('modalTitle').textContent = 'Launch Multi-Agent Debug (/debug)';
+  const body = document.getElementById('modalBody');
+  const allFiles = await ensureWsFilesCached();
+  const logFiles = allFiles.filter(f => /\.(log|out|err|txt)$/i.test(f)).slice(0, 40);
+  body.innerHTML = `
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:12px;">
+      Choose how to capture the failure for the 4-stage pipeline (<strong>Log Analyst → Root Cause → Fix Engineer → Verifier</strong>):
+    </div>
+    <div class="form-grid">
+      <div class="field full">
+        <label>1. Run a failing test or build command (--cmd)</label>
+        <input id="dbgCmdInput" value="${esc(appState?.test_command || '')}" placeholder="e.g. pytest -q, mvn -B test, npm test, python app.py" />
+      </div>
+      <div class="field full">
+        <label>2. Or select a log file in this workspace</label>
+        <select id="dbgLogSelect">
+          <option value="">— None —</option>
+          ${logFiles.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field full">
+        <label>3. Or paste an error message / stack trace</label>
+        <textarea id="dbgErrText" rows="4" placeholder="Paste traceback, exception, or error output here..."></textarea>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:10px;">
+      <label style="font-size:12.5px;"><input type="checkbox" id="dbgAnalyzeOnly" /> Analyze only (write <code>docs/DEBUG_REPORT.md</code> without editing code)</label>
+      <div style="display:flex;gap:8px;">
+        <button type="button" id="dbgAutoBtn" class="btn">Auto-Detect</button>
+        <button type="button" id="dbgLaunchBtn" class="btn primary">Start 4-Stage Debug</button>
+      </div>
+    </div>`;
+
+  const launch = (forceAuto = false) => {
+    const analyzeFlag = document.getElementById('dbgAnalyzeOnly').checked ? ' --analyze-only' : '';
+    if (forceAuto) {
+      modalBg.classList.remove('open');
+      sendMessage('/debug' + analyzeFlag);
+      return;
+    }
+    const cmd = document.getElementById('dbgCmdInput').value.trim();
+    const logFile = document.getElementById('dbgLogSelect').value.trim();
+    const pasted = document.getElementById('dbgErrText').value.trim();
+    let fullCmd = '/debug';
+    if (cmd) {
+      fullCmd = `/debug --cmd "${cmd.replaceAll('"', '\\"')}"${analyzeFlag}`;
+    } else if (logFile) {
+      fullCmd = `/debug ${logFile}${analyzeFlag}`;
+    } else if (pasted) {
+      fullCmd = `/debug "${pasted.replaceAll('"', "'").replaceAll('\n', ' ').slice(0, 1800)}"${analyzeFlag}`;
+    } else {
+      fullCmd = '/debug' + analyzeFlag;
+    }
+    modalBg.classList.remove('open');
+    sendMessage(fullCmd);
+  };
+  document.getElementById('dbgAutoBtn').onclick = () => launch(true);
+  document.getElementById('dbgLaunchBtn').onclick = () => launch(false);
+  document.getElementById('dbgCmdInput').onkeydown = (e) => { if (e.key === 'Enter') launch(false); };
+  modalBg.classList.add('open');
+  setTimeout(() => document.getElementById('dbgCmdInput')?.focus(), 40);
 }
 
 /* ---- Attach File Modal ---- */

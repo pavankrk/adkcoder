@@ -358,6 +358,10 @@ class DesktopController:
         self._abort_requested = False
         self._turn_seq = 0
         self._done_turn_id = 0
+        self._cancelled_turn_ids: set[int] = set()
+        self._active_worker: threading.Thread | None = None
+        self._active_turn_harness: AgentHarness | None = None
+        self._active_turn_message: str = ""
         self._queue: list[dict[str, str]] = []
         self._turn_snapshot: dict[str, Any] = {
             "turn_id": 0,
@@ -970,6 +974,8 @@ class DesktopController:
             self._busy = True
             self._abort_requested = False
             self._active_ws = str(h.root)
+            self._active_turn_harness = h
+            self._active_turn_message = cleaned
             self._turn_seq += 1
             turn_id = self._turn_seq
             is_debug_cmd = cleaned.lower().startswith("/debug")
@@ -993,6 +999,7 @@ class DesktopController:
                     else None
                 ),
             }
+        h.tools.reset_abort()
 
         # Auto-title default / auto-named sessions from the first user prompt
         try:
@@ -1011,27 +1018,97 @@ class DesktopController:
             args=(h, cleaned, turn_id),
             daemon=True,
         )
+        with self._lock:
+            self._active_worker = worker
         worker.start()
         return {"ok": True, "started": True, "turn_id": turn_id}
 
     def abort_active_turn(self) -> dict[str, Any]:
         with self._lock:
             self._abort_requested = True
+            self._queue.clear()
             ev = self._active_abort
             loop = self._active_loop
             task = self._active_task
+            worker = self._active_worker
+            cur_turn_id = self._turn_seq
+            was_busy = self._busy
+            active_h = self._active_turn_harness
+            active_msg = self._active_turn_message
+            partial_text = str(self._turn_snapshot.get("text") or "").strip()
+            harnesses_snapshot = list(self._harnesses.values())
             self._turn_snapshot["pending_approval"] = None
             for _, (pe, holder) in list(self._pending_approvals.items()):
                 holder["decision"] = False
                 pe.set()
+
+        # 1. Immediately kill any blocking shell subprocess across harnesses
+        for h in harnesses_snapshot:
+            with suppress(Exception):
+                h.tools.abort_running()
+
+        # 2. Cancel all asyncio tasks & signal abort_event on the worker loop
         if loop is not None and not loop.is_closed():
             if ev is not None:
                 with suppress(RuntimeError):
                     loop.call_soon_threadsafe(ev.set)
-            if task is not None:
-                with suppress(RuntimeError):
-                    loop.call_soon_threadsafe(task.cancel)
-        return {"ok": True, "busy": self._busy, "state": self.bootstrap_state()}
+
+            def _cancel_all() -> None:
+                if task is not None and not task.done():
+                    task.cancel()
+                for t in asyncio.all_tasks(loop):
+                    if not t.done():
+                        t.cancel()
+
+            with suppress(RuntimeError):
+                loop.call_soon_threadsafe(_cancel_all)
+
+        # 3. Wait briefly for cooperative shutdown; if a stubborn sync call lingers, force-detach UI cleanly
+        if worker is not None and worker.is_alive():
+            worker.join(timeout=0.6)
+
+        forced_done_event: dict[str, Any] | None = None
+        with self._lock:
+            if was_busy and self._busy and self._turn_seq == cur_turn_id:
+                self._cancelled_turn_ids.add(cur_turn_id)
+                self._busy = False
+                self._abort_requested = False
+                self._done_turn_id = cur_turn_id
+                self._active_loop = None
+                self._active_abort = None
+                self._active_task = None
+                self._active_worker = None
+                saved_reply = scrub(
+                    f"{partial_text}\n\n*(Stopped by user)*" if partial_text else "*(Stopped by user)*"
+                )
+                self._turn_snapshot.update(
+                    {
+                        "turn_id": cur_turn_id,
+                        "done_turn_id": cur_turn_id,
+                        "status": "aborted",
+                        "text": saved_reply,
+                        "error": "",
+                        "pending_approval": None,
+                    }
+                )
+                if active_h is not None and active_msg:
+                    with suppress(OSError):
+                        hist = active_h._load_history()
+                        hist.append({"role": "user", "text": scrub(active_msg)})
+                        hist.append({"role": "model", "text": saved_reply})
+                        active_h._save_history(hist)
+                forced_done_event = {
+                    "type": "turn_done",
+                    "turn_id": cur_turn_id,
+                    "text": saved_reply,
+                    "aborted": True,
+                }
+
+        state = self.bootstrap_state()
+        if forced_done_event is not None:
+            forced_done_event["state"] = state
+            self.emit(forced_done_event)
+        return {"ok": True, "busy": self._busy, "state": state}
 
     def _run_turn_worker(self, h: AgentHarness, message: str, turn_id: int) -> None:
         started_at = monotonic()
@@ -1041,15 +1118,16 @@ class DesktopController:
         streamed_text_chunks: list[str] = []
 
         def _emit_and_record(ev: dict[str, Any]) -> None:
-            etype = ev.get("type")
-            if etype == "text":
-                chunk = str(ev.get("text") or "")
-                streamed_text_chunks.append(chunk)
-                with self._lock:
+            with self._lock:
+                if turn_id in self._cancelled_turn_ids:
+                    return
+                etype = ev.get("type")
+                if etype == "text":
+                    chunk = str(ev.get("text") or "")
+                    streamed_text_chunks.append(chunk)
                     self._turn_snapshot["text"] = str(self._turn_snapshot.get("text") or "") + chunk
-            elif etype == "thought":
-                chunk = str(ev.get("text") or "")
-                with self._lock:
+                elif etype == "thought":
+                    chunk = str(ev.get("text") or "")
                     self._turn_snapshot["thought"] = (
                         str(self._turn_snapshot.get("thought") or "") + chunk
                     )
@@ -1229,80 +1307,93 @@ class DesktopController:
             harness_mod.render_tool_call = orig_render_call
             harness_mod.render_tool_result = orig_render_res
             h.abort_signal = None
-            # Mark any leftover running steps as done and persist compact step cards on the model turn
-            elapsed_total = round(monotonic() - started_at, 1)
-            for s in steps:
-                if s.get("status") == "running":
-                    s["status"] = "done" if turn_status == "done" else turn_status
-            saved_steps = [
-                {
-                    k: v
-                    for k, v in s.items()
-                    if k
-                    in {
-                        "id",
-                        "name",
-                        "status",
-                        "kind",
-                        "file_path",
-                        "summary",
-                        "content",
-                        "truncated",
-                        "search_block",
-                        "replace_block",
-                        "command",
-                        "lines_added",
-                        "lines_removed",
-                        "result_preview",
+            h.tools.reset_abort()
+            with self._lock:
+                already_force_aborted = turn_id in self._cancelled_turn_ids
+            next_queued: dict[str, str] | None = None
+            if not already_force_aborted:
+                # Mark any leftover running steps as done and persist compact step cards on the model turn
+                elapsed_total = round(monotonic() - started_at, 1)
+                for s in steps:
+                    if s.get("status") == "running":
+                        s["status"] = "done" if turn_status == "done" else turn_status
+                saved_steps = [
+                    {
+                        k: v
+                        for k, v in s.items()
+                        if k
+                        in {
+                            "id",
+                            "name",
+                            "status",
+                            "kind",
+                            "file_path",
+                            "summary",
+                            "content",
+                            "truncated",
+                            "search_block",
+                            "replace_block",
+                            "command",
+                            "lines_added",
+                            "lines_removed",
+                            "result_preview",
+                        }
                     }
-                }
-                for s in steps[-25:]
-            ]
-            # Ensure slash commands, stopped partial turns, errors, and step cards remain in session history
-            try:
-                cur_history = h._load_history()
-                if len(cur_history) <= history_len_before and saved_reply:
-                    cur_history.append({"role": "user", "text": scrub(message)})
-                    cur_history.append(
+                    for s in steps[-25:]
+                ]
+                # Ensure slash commands, stopped partial turns, errors, and step cards remain in session history
+                try:
+                    cur_history = h._load_history()
+                    if len(cur_history) <= history_len_before and saved_reply:
+                        cur_history.append({"role": "user", "text": scrub(message)})
+                        cur_history.append(
+                            {
+                                "role": "model",
+                                "text": saved_reply,
+                                "steps": saved_steps,
+                                "elapsed_s": elapsed_total,
+                            }
+                        )
+                        h._save_history(cur_history)
+                    elif saved_steps and cur_history and cur_history[-1].get("role") == "model":
+                        cur_history[-1]["steps"] = saved_steps
+                        cur_history[-1]["elapsed_s"] = elapsed_total
+                        h._save_history(cur_history)
+                except OSError:
+                    pass
+                with self._lock:
+                    self._busy = False
+                    self._abort_requested = False
+                    self._done_turn_id = turn_id
+                    self._active_loop = None
+                    self._active_abort = None
+                    self._active_task = None
+                    self._active_worker = None
+                    self._active_turn_harness = None
+                    self._active_turn_message = ""
+                    dp = self._turn_snapshot.get("debug_pipeline")
+                    if isinstance(dp, dict):
+                        dp["active"] = False
+                        if turn_status == "done":
+                            dp["stage"] = 4
+                        dp["report_exists"] = (h.root / "docs" / "DEBUG_REPORT.md").is_file()
+                    self._turn_snapshot.update(
                         {
-                            "role": "model",
-                            "text": saved_reply,
-                            "steps": saved_steps,
-                            "elapsed_s": elapsed_total,
+                            "turn_id": turn_id,
+                            "done_turn_id": turn_id,
+                            "status": turn_status,
+                            "text": saved_reply or self._turn_snapshot.get("text", ""),
+                            "error": turn_error,
+                            "pending_approval": None,
                         }
                     )
-                    h._save_history(cur_history)
-                elif saved_steps and cur_history and cur_history[-1].get("role") == "model":
-                    cur_history[-1]["steps"] = saved_steps
-                    cur_history[-1]["elapsed_s"] = elapsed_total
-                    h._save_history(cur_history)
-            except OSError:
-                pass
-            with self._lock:
-                self._busy = False
-                self._abort_requested = False
-                self._done_turn_id = turn_id
-                self._active_loop = None
-                self._active_abort = None
-                self._active_task = None
-                dp = self._turn_snapshot.get("debug_pipeline")
-                if isinstance(dp, dict):
-                    dp["active"] = False
-                    if turn_status == "done":
-                        dp["stage"] = 4
-                    dp["report_exists"] = (h.root / "docs" / "DEBUG_REPORT.md").is_file()
-                self._turn_snapshot.update(
-                    {
-                        "turn_id": turn_id,
-                        "done_turn_id": turn_id,
-                        "status": turn_status,
-                        "text": saved_reply or self._turn_snapshot.get("text", ""),
-                        "error": turn_error,
-                        "pending_approval": None,
-                    }
-                )
-                next_queued = self._queue.pop(0) if (turn_status == "done" and self._queue) else None
+                    next_queued = (
+                        self._queue.pop(0) if (turn_status == "done" and self._queue) else None
+                    )
             loop.close()
+
+        if already_force_aborted:
+            return
 
         if outcome_event is not None:
             outcome_event["state"] = self.bootstrap_state()
