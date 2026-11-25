@@ -9,6 +9,7 @@
     --bg: #ffffff;
     --sidebar: #f7f8fa;
     --surface: #ffffff;
+    --code-bg: #f8f9fb;
     --hover: #eef1f6;
     --active: #e6ecf8;
     --user-bubble: #e8f0fe;
@@ -17,11 +18,44 @@
     --text: #1f2328;
     --muted: #656d76;
     --green: #1a7f37;
+    --green-bg: #dafbe1;
     --red: #cf222e;
+    --red-bg: #ffebe9;
     --warn-bg: #fff8c5;
     --warn-text: #9a6700;
+    --syn-kw: #cf222e;
+    --syn-str: #0a3069;
+    --syn-num: #0550ae;
+    --syn-com: #6e7781;
+    --syn-fn: #8250df;
+    --syn-dec: #953800;
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
     --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  html[data-theme="dark"] {
+    --bg: #0f1419;
+    --sidebar: #161b22;
+    --surface: #1c2128;
+    --code-bg: #161b22;
+    --hover: #21262d;
+    --active: #1f2d47;
+    --user-bubble: #1d3557;
+    --border: #30363d;
+    --focus: #58a6ff;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --green-bg: #122e1d;
+    --red: #f85149;
+    --red-bg: #3b171b;
+    --warn-bg: #2e2409;
+    --warn-text: #e3b341;
+    --syn-kw: #ff7b72;
+    --syn-str: #a5d6ff;
+    --syn-num: #79c0ff;
+    --syn-com: #8b949e;
+    --syn-fn: #d2a8ff;
+    --syn-dec: #ffa657;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13.5px; line-height: 1.5; }
@@ -31,7 +65,7 @@
   .topbar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg);
-    -webkit-user-select: none; user-select: none;
+    -webkit-user-select: none; user-select: none; gap: 8px;
   }
   .top-left, .top-center, .top-right { display: flex; align-items: center; gap: 6px; }
   .icon-btn {
@@ -43,14 +77,22 @@
   .ws-pill {
     display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px;
     border: 1px solid var(--border); border-radius: 8px; background: var(--sidebar);
-    font-size: 12.5px; color: var(--text); min-width: 240px; max-width: 420px;
+    font-size: 12.5px; color: var(--text); min-width: 220px; max-width: 400px;
     cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .ws-pill:hover { border-color: #cfd5df; }
+  .ws-pill:hover { border-color: var(--focus); }
   .branch-tag { color: var(--muted); font-size: 11.5px; margin-left: auto; }
+  .watch-pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+    border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid var(--border);
+    background: var(--sidebar); color: var(--muted); cursor: pointer;
+  }
+  .watch-pill.pass { background: var(--green-bg); color: var(--green); border-color: transparent; }
+  .watch-pill.fail { background: var(--red-bg); color: var(--red); border-color: transparent; }
+  .watch-pill.running { background: var(--active); color: var(--focus); border-color: transparent; }
 
   /* Main body grid */
-  .body { display: grid; grid-template-columns: 260px 1fr auto; height: 100%; overflow: hidden; position: relative; }
+  .body { display: grid; grid-template-columns: 272px 1fr auto; height: 100%; overflow: hidden; position: relative; }
   .body.sidebar-collapsed { grid-template-columns: 0px 1fr auto; }
 
   /* Left Sidebar */
@@ -66,44 +108,42 @@
   }
   .side-item:hover { background: var(--hover); }
   .side-item.active { background: var(--active); font-weight: 500; }
-  .kbd { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; background: #fff; }
+  .kbd { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; background: var(--surface); }
   .side-sec-head {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px 4px; font-size: 11.5px; font-weight: 600; color: var(--muted);
+    padding: 8px 12px 4px; font-size: 11.5px; font-weight: 600; color: var(--muted);
   }
+  .side-search { padding: 2px 10px 6px; }
+  .side-search input {
+    width: 100%; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    border-radius: 7px; padding: 5px 8px; font: inherit; font-size: 12px; outline: none;
+  }
+  .side-search input:focus { border-color: var(--focus); }
   .sessions-scroll { flex: 1; overflow-y: auto; padding: 4px 8px 16px; }
   .ws-group { margin-bottom: 8px; }
   .ws-group-head {
     display: flex; align-items: center; justify-content: space-between;
     padding: 5px 8px; border-radius: 7px; font-size: 12.5px; font-weight: 600;
-    color: var(--text); cursor: pointer;
+    color: var(--text); cursor: pointer; gap: 6px;
   }
   .ws-group-head:hover { background: var(--hover); }
   .ws-group-head.active { background: var(--active); color: var(--focus); }
-  .toast {
-    position: fixed; bottom: 18px; right: 18px; z-index: 80;
-    max-width: 420px; padding: 10px 14px; border-radius: 10px;
-    background: #1f2328; color: #fff; font-size: 12.5px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.18); display: none;
-  }
-  .toast.err { background: var(--red); }
-  .toast.show { display: block; }
-  .profile-row {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px;
-  }
-  .badge {
-    display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 500;
-    background: var(--active); color: var(--focus);
-  }
-  .badge.ok { background: #dafbe1; color: var(--green); }
   .sess-row {
-    display: flex; flex-direction: column; gap: 2px;
-    padding: 6px 10px 6px 20px; border-radius: 8px; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 6px 8px 6px 18px; border-radius: 8px; cursor: pointer;
     font-size: 12.5px; color: var(--text); margin-top: 2px;
   }
   .sess-row:hover { background: var(--hover); }
   .sess-row.active { background: var(--active); }
+  .sess-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+  .sess-actions { display: none; gap: 2px; flex-shrink: 0; }
+  .sess-row:hover .sess-actions, .sess-row.active .sess-actions { display: flex; }
+  .sess-act-btn {
+    border: none; background: transparent; color: var(--muted); cursor: pointer;
+    width: 20px; height: 20px; border-radius: 5px; font-size: 11px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .sess-act-btn:hover { background: var(--surface); color: var(--text); }
   .sess-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
   .diff-add { color: var(--green); font-weight: 600; }
   .diff-del { color: var(--red); font-weight: 600; }
@@ -111,20 +151,20 @@
   /* Center Chat Stage */
   .stage { display: flex; flex-direction: column; height: 100%; overflow: hidden; position: relative; background: var(--bg); }
   .chat-scroll { flex: 1; overflow-y: auto; padding: 20px 28px 18px; }
-  .chat-inner { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
-  .empty-hero { text-align: center; padding: 64px 20px; color: var(--muted); }
+  .chat-inner { max-width: 840px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .empty-hero { text-align: center; padding: 56px 20px; color: var(--muted); }
   .empty-hero h2 { color: var(--text); font-size: 20px; font-weight: 600; margin: 0 0 8px; }
   .quick-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
   .chip {
     border: 1px solid var(--border); background: var(--sidebar); color: var(--text);
     border-radius: 999px; padding: 6px 12px; font-size: 12px; cursor: pointer;
   }
-  .chip:hover { background: var(--active); border-color: #c5d6f5; }
+  .chip:hover { background: var(--active); border-color: var(--focus); }
 
   .msg-user-wrap { display: flex; flex-direction: column; align-items: flex-end; }
   .msg-user {
     background: var(--user-bubble); color: var(--text);
-    padding: 10px 14px; border-radius: 12px; max-width: 78%;
+    padding: 10px 14px; border-radius: 12px; max-width: 80%;
     white-space: pre-wrap; word-break: break-word; font-size: 13.5px;
   }
   .msg-time { font-size: 11px; color: var(--muted); margin-top: 4px; }
@@ -134,82 +174,100 @@
     font-size: 12px; color: var(--muted); cursor: pointer;
     display: inline-flex; align-items: center; gap: 6px; user-select: none;
   }
-  .steps-list {
-    margin: 4px 0 6px; padding: 6px 0;
-    font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 6px;
-  }
+  .steps-list { margin: 4px 0 6px; padding: 6px 0; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
   .step-mini {
-    display: flex; align-items: center; gap: 7px; padding: 3px 8px;
-    border-radius: 6px; background: #fafbfc; border: 1px solid #eef0f4; color: var(--muted);
+    display: flex; align-items: center; gap: 7px; padding: 4px 9px;
+    border-radius: 6px; background: var(--sidebar); border: 1px solid var(--border); color: var(--muted);
   }
-  .step-card {
-    border: 1px solid var(--border); border-radius: 10px; background: #fff; overflow: hidden;
-  }
+  .step-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
   .step-card-head {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 7px 11px; background: #f8f9fb; cursor: pointer; list-style: none;
+    padding: 7px 11px; background: var(--sidebar); cursor: pointer; list-style: none;
     font-size: 12px; color: var(--text); user-select: none;
   }
   .step-card-head::-webkit-details-marker { display: none; }
   .step-card-left { display: flex; align-items: center; gap: 7px; min-width: 0; }
-  .step-card-path {
-    font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
+  .step-card-path { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .step-card-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 11px; }
   .step-code {
-    margin: 0; padding: 10px 12px; background: #fcfcfd; border-top: 1px solid var(--border);
-    font-family: var(--mono); font-size: 11.5px; line-height: 1.45;
-    max-height: 260px; overflow: auto; white-space: pre; color: var(--text);
+    margin: 0; padding: 10px 12px; background: var(--code-bg); border-top: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.48;
+    max-height: 280px; overflow: auto; white-space: pre; color: var(--text);
   }
   .step-shell {
     margin: 0; padding: 9px 12px; background: #0d1117; color: #e6edf3; border-top: 1px solid var(--border);
     font-family: var(--mono); font-size: 11.5px; line-height: 1.45;
-    max-height: 180px; overflow: auto; white-space: pre-wrap;
+    max-height: 200px; overflow: auto; white-space: pre-wrap;
   }
   .step-open-btn {
-    border: 1px solid var(--border); background: #fff; color: var(--focus);
+    border: 1px solid var(--border); background: var(--surface); color: var(--focus);
     font-size: 11px; padding: 1px 7px; border-radius: 5px; cursor: pointer;
   }
   .step-open-btn:hover { background: var(--active); }
   .st-ok { color: var(--green); font-weight: 700; }
   .st-err { color: var(--red); font-weight: 700; }
+
+  /* Syntax highlight spans */
+  .syn-kw { color: var(--syn-kw); font-weight: 600; }
+  .syn-str { color: var(--syn-str); }
+  .syn-num { color: var(--syn-num); }
+  .syn-com { color: var(--syn-com); font-style: italic; }
+  .syn-dec { color: var(--syn-dec); }
+  .ln-num { display: inline-block; width: 34px; color: var(--muted); opacity: 0.65; user-select: none; text-align: right; margin-right: 10px; }
+
+  /* Debug pipeline & Plan approval cards */
+  .debug-stepper {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--sidebar);
+  }
+  .dbg-stage {
+    font-size: 11.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--muted); display: inline-flex; align-items: center; gap: 5px;
+  }
+  .dbg-stage.done { background: var(--green-bg); color: var(--green); border-color: transparent; font-weight: 600; }
+  .dbg-stage.curr { background: var(--active); color: var(--focus); border-color: var(--focus); font-weight: 600; }
+  .plan-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 14px; border: 1px solid var(--focus); border-radius: 11px; background: var(--active);
+    font-size: 12.5px;
+  }
+
+  /* Mermaid SVG Card */
+  .mermaid-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin: 8px 0; overflow: hidden; }
+  .mermaid-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 10px; background: var(--sidebar); border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--muted);
+  }
+  .mermaid-viewport { padding: 12px; overflow: auto; max-height: 400px; text-align: center; background: var(--surface); }
+  .mermaid-viewport svg { transition: transform 0.12s; transform-origin: top center; max-width: 100%; height: auto; }
+
   .thought-box {
-    font-size: 12px; color: var(--muted); background: #fafbfc;
-    border-left: 2px solid #d0d7de; padding: 6px 10px; border-radius: 4px;
+    font-size: 12px; color: var(--muted); background: var(--sidebar);
+    border-left: 2px solid var(--border); padding: 6px 10px; border-radius: 4px;
     white-space: pre-wrap; max-height: 160px; overflow-y: auto;
   }
   .md-body p { margin: 0 0 8px; }
   .md-body p:last-child { margin-bottom: 0; }
   .md-body h1, .md-body h2, .md-body h3 { margin: 12px 0 6px; font-size: 14.5px; }
   .md-body ul, .md-body ol { margin: 4px 0 8px 20px; padding: 0; }
-  .md-body code {
-    font-family: var(--mono); font-size: 12px; background: #f2f4f8;
-    padding: 1px 5px; border-radius: 5px;
-  }
+  .md-body code { font-family: var(--mono); font-size: 12px; background: var(--code-bg); padding: 1px 5px; border-radius: 5px; }
   .code-wrap { position: relative; margin: 8px 0; }
   .code-wrap pre {
     margin: 0; padding: 11px 14px; border: 1px solid var(--border);
-    border-radius: 10px; background: #f8f9fb; overflow-x: auto;
-    font-family: var(--mono); font-size: 12px; line-height: 1.45;
+    border-radius: 10px; background: var(--code-bg); overflow-x: auto;
+    font-family: var(--mono); font-size: 12px; line-height: 1.48;
   }
   .copy-code-btn {
     position: absolute; top: 6px; right: 8px; border: 1px solid var(--border);
-    background: #fff; color: var(--muted); font-size: 11px; padding: 2px 7px;
+    background: var(--surface); color: var(--muted); font-size: 11px; padding: 2px 7px;
     border-radius: 6px; cursor: pointer;
   }
   .copy-code-btn:hover { color: var(--text); background: var(--hover); }
   .agent-footer { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 
-  .checkpoint-bar {
-    display: flex; align-items: center; gap: 10px; margin: 6px 0;
-    color: var(--muted); font-size: 11.5px;
-  }
+  .checkpoint-bar { display: flex; align-items: center; gap: 10px; margin: 6px 0; color: var(--muted); font-size: 11.5px; }
   .checkpoint-bar::before, .checkpoint-bar::after { content: ""; flex: 1; height: 1px; background: var(--border); }
-  .checkpoint-btn {
-    border: none; background: transparent; color: var(--muted); font: inherit;
-    cursor: pointer; padding: 2px 8px; border-radius: 6px;
-  }
+  .checkpoint-btn { border: none; background: transparent; color: var(--muted); font: inherit; cursor: pointer; padding: 2px 8px; border-radius: 6px; }
   .checkpoint-btn:hover { background: var(--hover); color: var(--text); }
 
   .approval-card {
@@ -217,14 +275,42 @@
     border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
   }
 
-  /* Composer */
-  .composer-area { padding: 8px 28px 16px; background: var(--bg); }
+  /* Composer + Autocomplete + Chips + Queue */
+  .composer-area { padding: 8px 28px 14px; background: var(--bg); position: relative; }
+  .composer-wrap { max-width: 840px; margin: 0 auto; position: relative; }
+  .ac-menu {
+    position: absolute; bottom: 100%; left: 0; right: 0; margin-bottom: 6px; z-index: 30;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.14); max-height: 240px; overflow-y: auto; display: none;
+  }
+  .ac-menu.open { display: block; }
+  .ac-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 7px 12px; cursor: pointer; font-size: 12.5px;
+  }
+  .ac-item:hover, .ac-item.sel { background: var(--active); }
+  .ac-item code { font-family: var(--mono); font-size: 12px; color: var(--focus); }
+  .chips-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .att-chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--sidebar);
+    font-size: 11.5px; color: var(--text);
+  }
+  .att-chip img { width: 18px; height: 18px; object-fit: cover; border-radius: 3px; }
+  .att-chip button { border: none; background: transparent; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 12px; }
+  .att-chip button:hover { color: var(--red); }
+  .queue-bar { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+  .queue-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 5px 10px; border-radius: 8px; border: 1px dashed var(--focus);
+    background: var(--active); font-size: 12px;
+  }
+
   .composer-box {
-    max-width: 820px; margin: 0 auto;
-    border: 1.5px solid #cbd5e1; border-radius: 14px; background: #fff;
+    border: 1.5px solid var(--border); border-radius: 14px; background: var(--surface);
     padding: 10px 12px 8px; transition: border-color 0.15s;
   }
-  .composer-box:focus-within { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(26,115,232,0.12); }
+  .composer-box:focus-within, .composer-box.drag-over { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(26,115,232,0.14); }
   .composer-box textarea {
     width: 100%; border: none; outline: none; resize: none;
     font: inherit; font-size: 13.5px; min-height: 44px; max-height: 180px;
@@ -232,7 +318,7 @@
   }
   .composer-bar {
     display: flex; align-items: center; justify-content: space-between;
-    gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #f0f2f5;
+    gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border);
     flex-wrap: wrap;
   }
   .bar-left, .bar-right { display: flex; align-items: center; gap: 6px; }
@@ -241,6 +327,11 @@
     font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px; cursor: pointer;
   }
   .mini-select:hover { background: var(--hover); color: var(--text); }
+  .ctx-btn {
+    border: 1px solid transparent; background: transparent; color: var(--muted);
+    font: inherit; font-size: 11.5px; padding: 2px 7px; border-radius: 6px; cursor: pointer;
+  }
+  .ctx-btn:hover { background: var(--hover); color: var(--text); border-color: var(--border); }
   .send-btn {
     width: 30px; height: 30px; border-radius: 999px; border: none;
     background: var(--focus); color: #fff; cursor: pointer; font-size: 14px;
@@ -252,58 +343,84 @@
   /* Floating Right Tool Pill + Drawer */
   .right-dock {
     position: absolute; right: 12px; top: 18px; z-index: 15;
-    background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
     padding: 4px; display: flex; flex-direction: column; gap: 2px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
   }
   .drawer {
-    width: 380px; border-left: 1px solid var(--border); background: var(--sidebar);
+    width: 420px; border-left: 1px solid var(--border); background: var(--sidebar);
     display: none; flex-direction: column; height: 100%; overflow: hidden;
   }
   .drawer.open { display: flex; }
   .drawer-head {
-    padding: 10px 14px; border-bottom: 1px solid var(--border); background: #fff;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface);
     display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 13px;
   }
   .drawer-body { flex: 1; overflow-y: auto; padding: 12px; }
   .file-row {
-    padding: 4px 8px; border-radius: 6px; font-family: var(--mono); font-size: 12px;
-    cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 4px 8px; border-radius: 6px; font-family: var(--mono); font-size: 12px; cursor: pointer;
   }
   .file-row:hover { background: var(--hover); }
-  .diff-line-add { background: #dafbe1; color: #116329; display: block; }
-  .diff-line-del { background: #ffebe9; color: #82071e; display: block; }
+  .diff-line-add { background: var(--green-bg); color: var(--green); display: block; }
+  .diff-line-del { background: var(--red-bg); color: var(--red); display: block; }
 
-  /* Modal (Settings / Automations) */
+  /* Modal & Tabs */
   .modal-bg {
-    position: fixed; inset: 0; background: rgba(15,23,42,0.28); z-index: 50;
+    position: fixed; inset: 0; background: rgba(15,23,42,0.38); z-index: 50;
     display: none; align-items: center; justify-content: center; padding: 20px;
   }
   .modal-bg.open { display: flex; }
   .modal {
-    background: #fff; border-radius: 16px; border: 1px solid var(--border);
-    width: min(760px, 95vw); max-height: 86vh; display: flex; flex-direction: column;
-    box-shadow: 0 18px 48px rgba(0,0,0,0.14); overflow: hidden;
+    background: var(--surface); color: var(--text); border-radius: 16px; border: 1px solid var(--border);
+    width: min(800px, 95vw); max-height: 88vh; display: flex; flex-direction: column;
+    box-shadow: 0 18px 48px rgba(0,0,0,0.22); overflow: hidden;
   }
   .modal-head { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
   .modal-body { padding: 16px 18px; overflow-y: auto; }
+  .tab-bar { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 14px; padding-bottom: 8px; }
+  .tab-btn {
+    border: 1px solid transparent; background: transparent; color: var(--muted);
+    padding: 5px 12px; border-radius: 999px; font: inherit; font-size: 12.5px; cursor: pointer;
+  }
+  .tab-btn.active { background: var(--active); color: var(--focus); font-weight: 600; }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .form-grid .full { grid-column: 1 / -1; }
   .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 500; }
-  .field input, .field select {
-    width: 100%; border: 1px solid var(--border); border-radius: 8px;
-    padding: 7px 10px; font: inherit; font-size: 13px;
+  .field input, .field select, .field textarea {
+    width: 100%; border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px;
   }
   .btn {
-    border: 1px solid var(--border); background: #fff; color: var(--text);
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
     border-radius: 999px; padding: 6px 13px; font: inherit; font-size: 12.5px;
     font-weight: 500; cursor: pointer;
   }
   .btn:hover { background: var(--hover); }
+  .btn.sm { padding: 3px 9px; font-size: 11.5px; }
   .btn.primary { background: var(--focus); color: #fff; border-color: transparent; }
   .btn.danger { background: var(--red); color: #fff; border-color: transparent; }
   .status-note { font-size: 12px; padding: 8px 10px; border-radius: 8px; margin-top: 8px; background: var(--sidebar); }
-  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #cbd5e1; border-top-color: var(--focus); border-radius: 50%; animation: spin 0.7s linear infinite; }
+  .profile-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px;
+    background: var(--surface);
+  }
+  .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 500;
+    background: var(--active); color: var(--focus);
+  }
+  .badge.ok { background: var(--green-bg); color: var(--green); }
+  .badge.err { background: var(--red-bg); color: var(--red); }
+  .toast {
+    position: fixed; bottom: 18px; right: 18px; z-index: 80;
+    max-width: 420px; padding: 10px 14px; border-radius: 10px;
+    background: #1f2328; color: #fff; font-size: 12.5px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.22); display: none;
+  }
+  .toast.err { background: var(--red); }
+  .toast.show { display: block; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--focus); border-radius: 50%; animation: spin 0.7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -314,22 +431,24 @@
     <div class="top-left">
       <button id="toggleSidebarBtn" class="icon-btn" title="Toggle sidebar">☰</button>
       <span style="font-weight:600; font-size:13.5px;">ADK Coder</span>
-      <span id="versionTag" style="font-size:11px; color:var(--muted);">v2.0.0</span>
+      <span id="versionTag" style="font-size:11px; color:var(--muted);">v2.1.0</span>
     </div>
     <div class="top-center">
-      <div id="wsPill" class="ws-pill" title="Click to add/switch workspace">
+      <div id="wsPill" class="ws-pill" title="Click to switch or open workspace">
         <span>📁</span>
         <span id="wsPillName">workspace</span>
         <span id="wsPillBranch" class="branch-tag"></span>
       </div>
-      <button id="runTestBtn" class="icon-btn" title="Run test command">▶</button>
+      <button id="runTestBtn" class="icon-btn" title="Open streaming terminal">▶</button>
+      <button id="watchPill" class="watch-pill" title="Toggle real-time test watcher">👁 Watch</button>
       <button id="openCodeBtn" class="icon-btn" title="Open workspace folder">↗</button>
     </div>
     <div class="top-right">
+      <button id="themeToggleBtn" class="icon-btn" title="Switch theme (Light / Dark / System)">☀</button>
       <button class="icon-btn" data-open-drawer="files" title="Files">📄</button>
-      <button class="icon-btn" data-open-drawer="diff" title="Git Diff">±</button>
-      <button class="icon-btn" data-open-drawer="inspector" title="Security / SBOM / Diagram">🛡</button>
-      <button class="icon-btn" data-open-drawer="terminal" title="Terminal">❯_</button>
+      <button class="icon-btn" data-open-drawer="diff" title="Git Diff & Commit">±</button>
+      <button class="icon-btn" data-open-drawer="inspector" title="Inspector: Security / Diagram / SBOM / Checkpoints">🛡</button>
+      <button class="icon-btn" data-open-drawer="terminal" title="Streaming Terminal & Watch">❯_</button>
     </div>
   </header>
 
@@ -339,7 +458,7 @@
     <aside class="sidebar">
       <div class="side-top">
         <button id="newSessionBtn" class="side-item"><span>＋ New Session</span><span class="kbd">⌘N</span></button>
-        <button id="automationsBtn" class="side-item"><span>⚡ Automations</span></button>
+        <button id="automationsBtn" class="side-item"><span>⚡ Automations &amp; Scaffold</span></button>
         <button id="customizationsBtn" class="side-item"><span>⚙ Customizations</span></button>
       </div>
       <div class="side-sec-head">
@@ -349,6 +468,9 @@
           <button id="refreshBtn" class="icon-btn" style="width:24px;height:24px;font-size:12px;" title="Refresh">↻</button>
         </div>
       </div>
+      <div class="side-search">
+        <input id="sessionSearchInput" placeholder="Search sessions..." />
+      </div>
       <div id="sessionsScroll" class="sessions-scroll"></div>
     </aside>
 
@@ -356,9 +478,9 @@
     <section class="stage">
       <div class="right-dock">
         <button class="icon-btn" data-open-drawer="files" title="Files">📄</button>
-        <button class="icon-btn" data-open-drawer="diff" title="Git Diff">±</button>
-        <button class="icon-btn" data-open-drawer="inspector" title="Security / SBOM / Diagram">🛡</button>
-        <button class="icon-btn" data-open-drawer="terminal" title="Terminal">❯_</button>
+        <button class="icon-btn" data-open-drawer="diff" title="Git Diff & Commit">±</button>
+        <button class="icon-btn" data-open-drawer="inspector" title="Inspector">🛡</button>
+        <button class="icon-btn" data-open-drawer="terminal" title="Terminal & Watch">❯_</button>
       </div>
 
       <div id="chatScroll" class="chat-scroll">
@@ -366,23 +488,29 @@
       </div>
 
       <div class="composer-area">
-        <div class="composer-box">
-          <textarea id="promptInput" rows="2" placeholder="Chat with ADK Coder... (type / for commands, @file to attach, Shift+Enter for newline)"></textarea>
-          <div class="composer-bar">
-            <div class="bar-left">
-              <button id="attachFileBtn" class="icon-btn" style="width:26px;height:26px;" title="Insert @file reference">＋</button>
-              <select id="modeSelect" class="mini-select" title="Execution mode">
-                <option value="ask">Ask Permissions</option>
-                <option value="auto-edit">Auto-Edit</option>
-                <option value="plan">Plan (Read-Only)</option>
-                <option value="full-auto">Full Auto</option>
-              </select>
-              <select id="profileSelect" class="mini-select" title="Switch LLM profile"></select>
-            </div>
-            <div class="bar-right">
-              <span id="modelLabel" style="font-size:11.5px; color:var(--muted);"></span>
-              <span id="ctxLabel" style="font-size:11.5px; color:var(--muted);"></span>
-              <button id="sendBtn" class="send-btn" title="Send (Enter)">↑</button>
+        <div class="composer-wrap">
+          <div id="acMenu" class="ac-menu"></div>
+          <div id="queueBar" class="queue-bar"></div>
+          <div id="chipsBar" class="chips-bar"></div>
+          <div id="composerBox" class="composer-box">
+            <textarea id="promptInput" rows="2" placeholder="Chat with ADK Coder... (/ commands, @ files, ⌘V paste image, Enter to send or queue)"></textarea>
+            <div class="composer-bar">
+              <div class="bar-left">
+                <button id="attachFileBtn" class="icon-btn" style="width:26px;height:26px;" title="Attach @file">＋</button>
+                <select id="modeSelect" class="mini-select" title="Execution mode">
+                  <option value="ask">Ask Permissions</option>
+                  <option value="auto-edit">Auto-Edit</option>
+                  <option value="plan">Plan (Read-Only)</option>
+                  <option value="full-auto">Full Auto</option>
+                </select>
+                <select id="profileSelect" class="mini-select" title="Switch LLM profile"></select>
+              </div>
+              <div class="bar-right">
+                <span id="modelLabel" style="font-size:11.5px; color:var(--muted);"></span>
+                <button id="ctxBtn" class="ctx-btn" title="Click to inspect tokens, pinned files & compact context">Low · 128K</button>
+                <button id="queueBtn" class="btn sm" style="display:none;" title="Queue next instruction while agent works">+ Queue</button>
+                <button id="sendBtn" class="send-btn" title="Send (Enter)">↑</button>
+              </div>
             </div>
           </div>
         </div>
@@ -400,11 +528,11 @@
   </div>
 </div>
 
-<!-- Modal for Customizations / Settings / Automations -->
+<!-- Modal -->
 <div id="modalBg" class="modal-bg">
   <div class="modal">
     <div class="modal-head">
-      <strong id="modalTitle">Customizations</strong>
+      <strong id="modalTitle">Modal</strong>
       <button id="closeModalBtn" class="icon-btn">✕</button>
     </div>
     <div id="modalBody" class="modal-body"></div>
@@ -419,7 +547,43 @@ let drawerKind = null;
 let liveTurn = null;
 let pendingApproval = null;
 let toastTimer = null;
+let turnPollTimer = null;
+let termPollTimer = null;
+let attachedItems = []; // { type: 'file'|'image', path, preview? }
+let cachedWsFiles = [];
+let cachedWsFilesRoot = '';
+let acItems = [];
+let acIndex = 0;
+let acMode = null; // 'cmd' | 'file'
+let sessionFilterQuery = '';
+let mermaidRegistry = [];
 
+/* ---- Theme Management ---- */
+const THEME_MODES = ['system', 'light', 'dark'];
+function applyTheme(mode) {
+  const chosen = THEME_MODES.includes(mode) ? mode : 'system';
+  localStorage.setItem('adk_coder_theme', chosen);
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const resolved = chosen === 'system' ? (prefersDark ? 'dark' : 'light') : chosen;
+  document.documentElement.setAttribute('data-theme', resolved);
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) {
+    btn.textContent = chosen === 'dark' ? '🌙' : (chosen === 'light' ? '☀' : '◐');
+    btn.title = `Theme: ${chosen} (click to cycle)`;
+  }
+}
+applyTheme(localStorage.getItem('adk_coder_theme') || 'system');
+window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+  if ((localStorage.getItem('adk_coder_theme') || 'system') === 'system') applyTheme('system');
+});
+
+/* ---- Helpers ---- */
+function esc(v) {
+  return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+}
+function nowTime() {
+  return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+}
 function showToast(msg, isErr = false) {
   const el = document.getElementById('toast');
   if (!el) return;
@@ -428,13 +592,286 @@ function showToast(msg, isErr = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.classList.remove('show'); }, isErr ? 4500 : 2500);
 }
-
-function esc(v) {
-  return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+async function apiGet(url) {
+  const res = await fetch(url);
+  return res.json();
+}
+async function apiPost(url, body) {
+  const res = await fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  const data = await res.json();
+  if (!res.ok && data.error) throw new Error(data.error);
+  return data;
 }
 
-function nowTime() {
-  return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+/* ---- Lightweight Offline Syntax Highlighter ---- */
+const KW_RE = /\b(def|class|return|import|from|as|if|elif|else|for|while|try|except|finally|with|async|await|yield|pass|break|continue|raise|lambda|and|or|not|in|is|None|True|False|function|const|let|var|export|default|new|typeof|interface|type|public|private|protected|static|final|void|int|String|boolean|package|struct|func|go|defer|select|case|switch|throw|catch|extends|implements|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|TABLE)\b/g;
+
+function highlightLine(raw) {
+  const tokens = [];
+  let s = esc(raw);
+  // Comments (# or //)
+  s = s.replace(/((?:^|\s)(?:#|\/\/).*$)/g, (m) => {
+    const id = tokens.length;
+    tokens.push(`<span class="syn-com">${m}</span>`);
+    return `\u0000T${id}\u0000`;
+  });
+  // Strings
+  s = s.replace(/(&quot;(?:\\.|[^&]|&(?!quot;))*?&quot;|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)/g, (m) => {
+    const id = tokens.length;
+    tokens.push(`<span class="syn-str">${m}</span>`);
+    return `\u0000T${id}\u0000`;
+  });
+  // Decorators
+  s = s.replace(/(^|\s)(@[A-Za-z_][\w.]*)/g, '$1<span class="syn-dec">$2</span>');
+  // Keywords & Numbers
+  s = s.replace(KW_RE, '<span class="syn-kw">$1</span>');
+  s = s.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="syn-num">$1</span>');
+  return s.replace(/\u0000T(\d+)\u0000/g, (_, idx) => tokens[Number(idx)] || '');
+}
+
+function highlightCodeBlock(code, withLineNumbers = false) {
+  const lines = String(code ?? '').split('\n');
+  return lines.map((ln, idx) => {
+    const hl = highlightLine(ln);
+    return withLineNumbers ? `<span class="ln-num">${idx + 1}</span>${hl}` : hl;
+  }).join('\n');
+}
+
+/* ---- ANSI to HTML for Streaming Terminal ---- */
+function renderAnsi(text) {
+  const map = { '31': '#ff7b72', '32': '#3fb950', '33': '#e3b341', '34': '#58a6ff', '35': '#d2a8ff', '36': '#56d4dd', '90': '#8b949e', '1': 'bold' };
+  let out = '';
+  let open = false;
+  const parts = String(text || '').split(/\x1b\[([0-9;]*)m/);
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 0) {
+      out += esc(parts[i]);
+    } else {
+      const codes = parts[i].split(';');
+      if (open) { out += '</span>'; open = false; }
+      const styles = [];
+      codes.forEach(c => {
+        if (c === '0' || c === '') return;
+        if (map[c] === 'bold') styles.push('font-weight:700');
+        else if (map[c]) styles.push('color:' + map[c]);
+      });
+      if (styles.length) { out += `<span style="${styles.join(';')}">`; open = true; }
+    }
+  }
+  if (open) out += '</span>';
+  return out;
+}
+
+/* ---- Pure-JS Offline Mermaid SVG Renderer (Flowchart / Graph / Sequence) ---- */
+function renderMermaidSvg(src) {
+  const lines = String(src || '').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('%%'));
+  if (!lines.length) return '';
+  const first = lines[0].toLowerCase();
+
+  if (first.startsWith('sequencediagram')) {
+    const actors = [];
+    const msgs = [];
+    const ensureActor = (a) => { const c = a.trim(); if (c && !actors.includes(c)) actors.push(c); return c; };
+    for (let i = 1; i < lines.length; i++) {
+      const ln = lines[i];
+      const pm = ln.match(/^participant\s+(\S+)(?:\s+as\s+(.+))?$/i);
+      if (pm) { ensureActor(pm[1]); continue; }
+      const mm = ln.match(/^([^-=]+?)\s*(->>|-->>|->|-->)\s*([^:]+?)\s*:\s*(.*)$/);
+      if (mm) {
+        const from = ensureActor(mm[1]);
+        const to = ensureActor(mm[3]);
+        msgs.push({ from, to, dashed: mm[2].startsWith('--'), label: mm[4].trim() });
+      }
+    }
+    if (!actors.length) return '';
+    const colW = 160, padX = 40, topY = 42, stepY = 44;
+    const width = Math.max(360, padX * 2 + actors.length * colW);
+    const height = topY + 34 + Math.max(1, msgs.length) * stepY + 30;
+    const posX = (a) => padX + actors.indexOf(a) * colW + colW / 2;
+    let body = `<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#58a6ff"/></marker></defs>`;
+    actors.forEach(a => {
+      const x = posX(a);
+      body += `<rect x="${x - 56}" y="12" width="112" height="28" rx="7" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.3"/>` +
+        `<text x="${x}" y="30" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">${esc(a.slice(0, 18))}</text>` +
+        `<line x1="${x}" y1="40" x2="${x}" y2="${height - 14}" stroke="#cbd5e1" stroke-dasharray="4 3"/>`;
+    });
+    msgs.forEach((m, idx) => {
+      const y = topY + 28 + idx * stepY;
+      const x1 = posX(m.from), x2 = posX(m.to);
+      const mid = (x1 + x2) / 2;
+      body += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#1a73e8" stroke-width="1.5" ${m.dashed ? 'stroke-dasharray="5 3"' : ''} marker-end="url(#arr)"/>` +
+        `<text x="${mid}" y="${y - 6}" text-anchor="middle" font-size="11" fill="#656d76">${esc(m.label.slice(0, 38))}</text>`;
+    });
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">${body}</svg>`;
+  }
+
+  // Flowchart / Graph
+  const isLR = /\bLR\b|\bRL\b/i.test(first);
+  const nodes = new Map();
+  const edges = [];
+  const parseNode = (raw) => {
+    const t = raw.trim();
+    const m = t.match(/^([A-Za-z0-9_.-]+)\s*(?:\[\s*"?([^"\]]+)"?\s*\]|\(\s*"?([^")]+)"?\s*\)|\{\s*"?([^"}]+)"?\s*\})?$/);
+    if (!m) {
+      const id = t.replace(/[^A-Za-z0-9_]/g, '_') || ('n' + nodes.size);
+      if (!nodes.has(id)) nodes.set(id, { id, label: t.slice(0, 26) });
+      return id;
+    }
+    const id = m[1];
+    const lbl = (m[2] || m[3] || m[4] || id).trim();
+    if (!nodes.has(id) || (nodes.get(id).label === id && lbl !== id)) {
+      nodes.set(id, { id, label: lbl.slice(0, 28) });
+    }
+    return id;
+  };
+  for (let i = 1; i < lines.length; i++) {
+    const ln = lines[i];
+    if (/^(subgraph|end|style|classDef|class|click)\b/i.test(ln)) continue;
+    const em = ln.match(/^(.+?)\s*(?:-->|-.->|==>|---)\s*(?:\|([^|]+)\|\s*)?(.+)$/);
+    if (em) {
+      const a = parseNode(em[1]);
+      const b = parseNode(em[3]);
+      edges.push({ from: a, to: b, label: (em[2] || '').trim(), dashed: ln.includes('-.->') });
+    } else if (/^[A-Za-z0-9_.-]+[\[\(\{]/.test(ln)) {
+      parseNode(ln);
+    }
+  }
+  const list = Array.from(nodes.values());
+  if (!list.length) return '';
+
+  // Topological level assignment (handles cycles cleanly)
+  const indeg = new Map(list.map(n => [n.id, 0]));
+  const adj = new Map(list.map(n => [n.id, []]));
+  edges.forEach(e => {
+    if (adj.has(e.from) && indeg.has(e.to)) {
+      adj.get(e.from).push(e.to);
+      indeg.set(e.to, indeg.get(e.to) + 1);
+    }
+  });
+  const level = new Map();
+  const q = list.filter(n => indeg.get(n.id) === 0).map(n => n.id);
+  if (!q.length) q.push(list[0].id);
+  q.forEach(id => level.set(id, 0));
+  const visited = new Set(q);
+  while (q.length) {
+    const u = q.shift();
+    const lu = level.get(u) || 0;
+    for (const v of (adj.get(u) || [])) {
+      if (!visited.has(v)) {
+        visited.add(v);
+        level.set(v, lu + 1);
+        q.push(v);
+      }
+    }
+  }
+  list.forEach(n => { if (!level.has(n.id)) level.set(n.id, 0); });
+  const layers = new Map();
+  list.forEach(n => {
+    const lv = level.get(n.id);
+    if (!layers.has(lv)) layers.set(lv, []);
+    layers.get(lv).push(n);
+  });
+  const sortedLvs = Array.from(layers.keys()).sort((a, b) => a - b);
+  const boxW = 152, boxH = 38, gapX = 36, gapY = 54, pad = 28;
+  const maxPerLayer = Math.max(...sortedLvs.map(lv => layers.get(lv).length));
+  const coords = new Map();
+  let width, height;
+  if (isLR) {
+    width = pad * 2 + sortedLvs.length * (boxW + gapX) - gapX;
+    height = pad * 2 + maxPerLayer * (boxH + gapY) - gapY;
+    sortedLvs.forEach((lv, li) => {
+      const grp = layers.get(lv);
+      const totalH = grp.length * (boxH + gapY) - gapY;
+      const startY = (height - totalH) / 2;
+      grp.forEach((n, idx) => coords.set(n.id, { x: pad + li * (boxW + gapX), y: startY + idx * (boxH + gapY) }));
+    });
+  } else {
+    width = Math.max(360, pad * 2 + maxPerLayer * (boxW + gapX) - gapX);
+    height = pad * 2 + sortedLvs.length * (boxH + gapY) - gapY;
+    sortedLvs.forEach((lv, li) => {
+      const grp = layers.get(lv);
+      const totalW = grp.length * (boxW + gapX) - gapX;
+      const startX = (width - totalW) / 2;
+      grp.forEach((n, idx) => coords.set(n.id, { x: startX + idx * (boxW + gapX), y: pad + li * (boxH + gapY) }));
+    });
+  }
+  let svg = `<defs><marker id="marr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1a73e8"/></marker></defs>`;
+  edges.forEach(e => {
+    const p1 = coords.get(e.from), p2 = coords.get(e.to);
+    if (!p1 || !p2) return;
+    const x1 = isLR ? p1.x + boxW : p1.x + boxW / 2;
+    const y1 = isLR ? p1.y + boxH / 2 : p1.y + boxH;
+    const x2 = isLR ? p2.x : p2.x + boxW / 2;
+    const y2 = isLR ? p2.y + boxH / 2 : p2.y;
+    const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+    svg += `<path d="M${x1},${y1} Q${cx},${isLR ? y1 : cy} ${x2},${y2}" fill="none" stroke="#1a73e8" stroke-width="1.4" ${e.dashed ? 'stroke-dasharray="4 3"' : ''} marker-end="url(#marr)"/>`;
+    if (e.label) svg += `<text x="${cx}" y="${cy - 4}" text-anchor="middle" font-size="10.5" fill="#656d76">${esc(e.label.slice(0, 22))}</text>`;
+  });
+  list.forEach(n => {
+    const p = coords.get(n.id);
+    svg += `<rect x="${p.x}" y="${p.y}" width="${boxW}" height="${boxH}" rx="9" fill="#e8f0fe" stroke="#1a73e8" stroke-width="1.3"/>` +
+      `<text x="${p.x + boxW / 2}" y="${p.y + boxH / 2 + 4}" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2328">${esc(n.label)}</text>`;
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">${svg}</svg>`;
+}
+
+function buildMermaidCardHtml(mermaidSrc, idx) {
+  const svg = renderMermaidSvg(mermaidSrc);
+  if (!svg) return '';
+  mermaidRegistry[idx] = { src: mermaidSrc, svg, zoom: 1 };
+  return `<div class="mermaid-card" data-mcard="${idx}">
+    <div class="mermaid-head">
+      <span>📊 Mermaid Diagram</span>
+      <div style="display:flex;gap:4px;">
+        <button type="button" class="btn sm" data-mzoom="${idx}" data-delta="-0.2">−</button>
+        <button type="button" class="btn sm" data-mzoom="${idx}" data-delta="0.2">＋</button>
+        <button type="button" class="btn sm" data-mtoggle="${idx}">Code</button>
+        <button type="button" class="btn sm" data-msvg="${idx}">Export SVG</button>
+      </div>
+    </div>
+    <div class="mermaid-viewport" data-mview="${idx}">${svg}</div>
+    <pre class="step-code" data-mraw="${idx}" style="display:none;"><code>${esc(mermaidSrc)}</code></pre>
+  </div>`;
+}
+
+function wireMermaidCards(rootEl) {
+  rootEl.querySelectorAll('[data-mzoom]').forEach(btn => {
+    btn.onclick = () => {
+      const idx = Number(btn.dataset.mzoom);
+      const rec = mermaidRegistry[idx];
+      if (!rec) return;
+      rec.zoom = Math.max(0.5, Math.min(2.2, rec.zoom + Number(btn.dataset.delta)));
+      const svgEl = rootEl.querySelector(`[data-mview="${idx}"] svg`);
+      if (svgEl) svgEl.style.transform = `scale(${rec.zoom})`;
+    };
+  });
+  rootEl.querySelectorAll('[data-mtoggle]').forEach(btn => {
+    btn.onclick = () => {
+      const idx = Number(btn.dataset.mtoggle);
+      const raw = rootEl.querySelector(`[data-mraw="${idx}"]`);
+      const view = rootEl.querySelector(`[data-mview="${idx}"]`);
+      if (!raw || !view) return;
+      const showingRaw = raw.style.display !== 'none';
+      raw.style.display = showingRaw ? 'none' : 'block';
+      view.style.display = showingRaw ? 'block' : 'none';
+      btn.textContent = showingRaw ? 'Code' : 'Diagram';
+    };
+  });
+  rootEl.querySelectorAll('[data-msvg]').forEach(btn => {
+    btn.onclick = () => {
+      const rec = mermaidRegistry[Number(btn.dataset.msvg)];
+      if (!rec) return;
+      const blob = new Blob([rec.svg], { type: 'image/svg+xml' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'adk-coder-diagram.svg';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+  });
 }
 
 function renderMarkdown(md) {
@@ -442,7 +879,15 @@ function renderMarkdown(md) {
   const blocks = [];
   const replaced = src.replace(/```([\w+-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
     const idx = blocks.length;
-    blocks.push(`<div class="code-wrap"><button class="copy-code-btn" data-copy-code="${idx}">Copy</button><pre data-code-idx="${idx}"><code>${esc(code)}</code></pre></div>`);
+    if ((lang || '').toLowerCase() === 'mermaid') {
+      const mIdx = mermaidRegistry.length;
+      const card = buildMermaidCardHtml(code, mIdx);
+      if (card) {
+        blocks.push(card);
+        return `@@CODEBLOCK_${idx}@@`;
+      }
+    }
+    blocks.push(`<div class="code-wrap"><button class="copy-code-btn" data-copy-code="${idx}">Copy</button><pre data-code-idx="${idx}"><code>${highlightCodeBlock(code, false)}</code></pre></div>`);
     return `@@CODEBLOCK_${idx}@@`;
   });
   let html = esc(replaced)
@@ -463,25 +908,55 @@ function renderMarkdown(md) {
   return html;
 }
 
-async function apiGet(url) {
-  const res = await fetch(url);
-  return res.json();
-}
-async function apiPost(url, body) {
-  const res = await fetch(url, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {})
-  });
-  const data = await res.json();
-  if (!res.ok && data.error) throw new Error(data.error);
-  return data;
-}
-
 function scrollChatBottom() {
   const sc = document.getElementById('chatScroll');
   sc.scrollTop = sc.scrollHeight;
 }
 
+/* ---- Chips & Queue Rendering ---- */
+function renderChipsAndQueue() {
+  const cb = document.getElementById('chipsBar');
+  cb.innerHTML = attachedItems.map((it, idx) => `
+    <span class="att-chip">
+      ${it.type === 'image' && it.preview ? `<img src="${esc(it.preview)}" alt="img"/>` : '<span>📎</span>'}
+      <span>${esc(it.path)}</span>
+      <button type="button" data-rm-att="${idx}" title="Remove">✕</button>
+    </span>`).join('');
+  cb.querySelectorAll('[data-rm-att]').forEach(btn => {
+    btn.onclick = () => { attachedItems.splice(Number(btn.dataset.rmAtt), 1); renderChipsAndQueue(); };
+  });
+
+  const qList = (appState && appState.queued_messages) || [];
+  const qb = document.getElementById('queueBar');
+  qb.innerHTML = qList.map((q, idx) => `
+    <div class="queue-item">
+      <span>⏳ <strong>Queued #${idx + 1}:</strong> ${esc(q.message)}</span>
+      <button type="button" class="btn sm" data-rm-queue="${idx}">✕</button>
+    </div>`).join('');
+  qb.querySelectorAll('[data-rm-queue]').forEach(btn => {
+    btn.onclick = async () => {
+      const r = await apiPost('/api/chat/queue/remove', { index: Number(btn.dataset.rmQueue) });
+      if (appState) appState.queued_messages = r.queued_messages || [];
+      renderChipsAndQueue();
+    };
+  });
+}
+
+/* ---- Watch Pill Rendering ---- */
+function renderWatchPill(watch) {
+  const pill = document.getElementById('watchPill');
+  if (!pill) return;
+  if (!watch || !watch.running) {
+    pill.className = 'watch-pill';
+    pill.textContent = '👁 Watch';
+    return;
+  }
+  const st = watch.last_status || 'watching';
+  pill.className = 'watch-pill ' + (st === 'pass' ? 'pass' : (st === 'fail' ? 'fail' : 'running'));
+  pill.textContent = st === 'pass' ? `✓ Watch (${watch.run_count})` : (st === 'fail' ? `✕ Watch FAIL` : '👁 Watching…');
+}
+
+/* ---- Sidebar & Topbar ---- */
 function renderTopAndSidebar() {
   if (!appState) return;
   document.getElementById('versionTag').textContent = 'v' + appState.version;
@@ -489,19 +964,28 @@ function renderTopAndSidebar() {
   document.getElementById('wsPillBranch').textContent = appState.branch ? (appState.branch + (appState.dirty ? '*' : '')) : '';
   document.getElementById('modeSelect').value = appState.mode || 'ask';
   document.getElementById('modelLabel').textContent = appState.model;
+
   const ctx = appState.context || {};
   const limK = Math.round((ctx.limit || 0) / 1000);
-  document.getElementById('ctxLabel').textContent = `${ctx.label || 'Low'} · ${limK}K`;
+  const pinnedCnt = (appState.pinned || []).length;
+  document.getElementById('ctxBtn').textContent = `${ctx.label || 'Low'} · ${limK}K${pinnedCnt ? ` · 📌${pinnedCnt}` : ''}`;
 
+  renderWatchPill(appState.watch);
+  renderChipsAndQueue();
+
+  const isBusy = !!(appState.busy || liveTurn);
   const sendBtn = document.getElementById('sendBtn');
-  if (appState.busy || liveTurn) {
+  const queueBtn = document.getElementById('queueBtn');
+  if (isBusy) {
     sendBtn.className = 'send-btn stop';
     sendBtn.textContent = '■';
     sendBtn.title = 'Stop generation';
+    queueBtn.style.display = 'inline-block';
   } else {
     sendBtn.className = 'send-btn';
     sendBtn.textContent = '↑';
     sendBtn.title = 'Send (Enter)';
+    queueBtn.style.display = 'none';
   }
 
   // Profiles dropdown
@@ -518,17 +1002,27 @@ function renderTopAndSidebar() {
     ).join('');
   }
 
-  // Sidebar workspaces & sessions
+  // Sidebar workspaces & sessions (with filter)
+  const q = sessionFilterQuery.trim().toLowerCase();
   const sc = document.getElementById('sessionsScroll');
   sc.innerHTML = (appState.workspaces || []).map(ws => {
     const diffBadge = (ws.added || ws.deleted)
       ? `<span class="diff-add">+${ws.added}</span> <span class="diff-del">-${ws.deleted}</span>`
       : '';
-    const sessHtml = (ws.sessions || []).map(s => {
+    const filteredSess = (ws.sessions || []).filter(s => !q || s.name.toLowerCase().includes(q) || ws.name.toLowerCase().includes(q));
+    if (q && !filteredSess.length && !ws.name.toLowerCase().includes(q)) return '';
+    const sessHtml = filteredSess.map(s => {
       const isAct = ws.active && s.id === ws.active_session_id;
       return `<div class="sess-row ${isAct ? 'active' : ''}" data-ws="${esc(ws.path)}" data-sess="${esc(s.id)}">
-        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.name)}</div>
-        <div class="sess-meta">${isAct ? diffBadge : ''} <span>${esc((s.updated_at || '').slice(0, 16).replace('T', ' '))}</span></div>
+        <div class="sess-main">
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.name)}</div>
+          <div class="sess-meta">${isAct ? diffBadge : ''} <span>${esc((s.updated_at || '').slice(0, 16).replace('T', ' '))}</span></div>
+        </div>
+        <div class="sess-actions">
+          <button type="button" class="sess-act-btn" data-ren-ws="${esc(ws.path)}" data-ren-id="${esc(s.id)}" data-ren-cur="${esc(s.name)}" title="Rename">✎</button>
+          <button type="button" class="sess-act-btn" data-fork-ws="${esc(ws.path)}" data-fork-id="${esc(s.id)}" title="Fork">⑂</button>
+          <button type="button" class="sess-act-btn" data-del-ws="${esc(ws.path)}" data-del-id="${esc(s.id)}" title="Delete">✕</button>
+        </div>
       </div>`;
     }).join('');
     return `<div class="ws-group">
@@ -544,35 +1038,58 @@ function renderTopAndSidebar() {
     el.onclick = async () => {
       try {
         appState = await apiPost('/api/workspace/select', { workspace: el.dataset.selectWs });
+        cachedWsFilesRoot = '';
         renderAll();
         showToast('Switched workspace to ' + appState.workspace_name);
-      } catch (err) {
-        showToast('Workspace switch failed: ' + err.message, true);
-      }
+      } catch (err) { showToast('Workspace switch failed: ' + err.message, true); }
     };
   });
   sc.querySelectorAll('[data-sess]').forEach(el => {
-    el.onclick = async () => {
+    el.onclick = async (e) => {
+      if (e.target.closest('.sess-actions')) return;
       try {
         await apiPost('/api/workspace/select', { workspace: el.dataset.ws });
         const res = await apiPost('/api/session/select', { workspace: el.dataset.ws, session_id: el.dataset.sess });
         appState = res.state;
         renderAll();
-      } catch (err) {
-        showToast('Session switch failed: ' + err.message, true);
-      }
+      } catch (err) { showToast('Session switch failed: ' + err.message, true); }
+    };
+  });
+  sc.querySelectorAll('[data-ren-id]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      openRenameSessionModal(btn.dataset.renWs, btn.dataset.renId, btn.dataset.renCur);
+    };
+  });
+  sc.querySelectorAll('[data-fork-id]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      try {
+        const r = await apiPost('/api/session/fork', { workspace: btn.dataset.forkWs, session_id: btn.dataset.forkId });
+        appState = r.state;
+        renderAll();
+        showToast('Forked session');
+      } catch (err) { showToast('Fork failed: ' + err.message, true); }
+    };
+  });
+  sc.querySelectorAll('[data-del-id]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      try {
+        const r = await apiPost('/api/session/delete', { workspace: btn.dataset.delWs, session_id: btn.dataset.delId });
+        appState = r.state;
+        renderAll();
+        showToast('Deleted session');
+      } catch (err) { showToast('Delete failed: ' + err.message, true); }
     };
   });
 }
 
+/* ---- Step Cards, Debug Stepper & Chat Rendering ---- */
 function renderDiffPreview(oldBlk, newBlk) {
   const parts = [];
-  if (oldBlk) {
-    oldBlk.split('\n').forEach(ln => parts.push(`<span class="diff-line-del">- ${esc(ln)}</span>`));
-  }
-  if (newBlk) {
-    newBlk.split('\n').forEach(ln => parts.push(`<span class="diff-line-add">+ ${esc(ln)}</span>`));
-  }
+  if (oldBlk) oldBlk.split('\n').forEach(ln => parts.push(`<span class="diff-line-del">- ${esc(ln)}</span>`));
+  if (newBlk) newBlk.split('\n').forEach(ln => parts.push(`<span class="diff-line-add">+ ${esc(ln)}</span>`));
   return parts.join('') || '<span style="color:var(--muted);">(applying edit...)</span>';
 }
 
@@ -587,15 +1104,15 @@ function renderStepItem(s, openByDefault = false) {
   if (s.kind === 'write' || s.name === 'write_file') {
     const linesBadge = s.lines_added ? `<span class="diff-add">+${s.lines_added} lines</span>` : '';
     const verb = s.status === 'running' ? 'Writing' : (s.status === 'error' ? 'Failed' : 'Written');
-    const codeText = s.content
-      ? esc(s.content) + (s.truncated ? '\n\n… truncated (click Open to inspect full file)' : '')
+    const codeHtml = s.content
+      ? highlightCodeBlock(s.content, true) + (s.truncated ? '\n\n<span class="syn-com">… truncated (click Open to inspect full file)</span>' : '')
       : '<span style="color:var(--muted);">Preparing file contents...</span>';
     return `<details class="step-card" ${openByDefault ? 'open' : ''}>
       <summary class="step-card-head">
         <div class="step-card-left">${stIcon}<span>📝</span><span class="step-card-path">${esc(s.file_path || 'file')}</span></div>
         <div class="step-card-right">${linesBadge}<span style="color:var(--muted);">${verb}</span>${openBtn}</div>
       </summary>
-      <pre class="step-code"><code>${codeText}</code></pre>
+      <pre class="step-code"><code>${codeHtml}</code></pre>
     </details>`;
   }
 
@@ -616,7 +1133,7 @@ function renderStepItem(s, openByDefault = false) {
 
   if (s.kind === 'shell' || s.name === 'run_shell_command') {
     const outHtml = s.result_preview
-      ? `<pre class="step-shell">$ ${esc(s.command || '')}\n${esc(s.result_preview)}</pre>`
+      ? `<pre class="step-shell">$ ${esc(s.command || '')}\n${renderAnsi(s.result_preview)}</pre>`
       : `<pre class="step-shell">$ ${esc(s.command || '')}</pre>`;
     return `<details class="step-card" ${openByDefault ? 'open' : ''}>
       <summary class="step-card-head">
@@ -626,7 +1143,6 @@ function renderStepItem(s, openByDefault = false) {
       ${outHtml}
     </details>`;
   }
-
   return `<div class="step-mini">${stIcon}<span>${esc(s.summary || s.name)}</span>${openBtn}</div>`;
 }
 
@@ -639,7 +1155,6 @@ function renderStepsGroup(steps, { live = false, elapsed_s = null } = {}) {
     const openDefault = live && isCodeCard && (s.status === 'running' || idx === lastIdx);
     return renderStepItem(s, openDefault);
   }).join('');
-
   if (live) {
     const latest = steps[lastIdx];
     const headline = latest?.status === 'running' && latest?.summary
@@ -650,7 +1165,6 @@ function renderStepsGroup(steps, { live = false, elapsed_s = null } = {}) {
       <div class="steps-list">${cards}</div>
     </details>`;
   }
-
   const timeTag = elapsed_s != null ? ` in ${elapsed_s}s` : '';
   const editTag = writeCount ? ` · ${writeCount} file edit${writeCount === 1 ? '' : 's'}` : '';
   return `<details ${writeCount ? 'open' : ''}>
@@ -659,8 +1173,24 @@ function renderStepsGroup(steps, { live = false, elapsed_s = null } = {}) {
   </details>`;
 }
 
+function renderDebugStepper(dp) {
+  if (!dp) return '';
+  const stages = dp.stages || ['Log Analyst', 'Root Cause', 'Fix Engineer', 'Verifier'];
+  const cur = Number(dp.stage || 0);
+  const pills = stages.map((label, idx) => {
+    const cls = idx < cur ? 'done' : (idx === cur && dp.active ? 'curr' : '');
+    const icon = idx < cur ? '✓' : (idx === cur && dp.active ? '<span class="spinner"></span>' : (idx + 1) + '.');
+    return `<span class="dbg-stage ${cls}">${icon} ${esc(label)}</span>`;
+  }).join('<span style="color:var(--muted);">→</span>');
+  const reportBtn = dp.report_exists
+    ? `<button type="button" class="btn sm" data-view-file="docs/DEBUG_REPORT.md">View DEBUG_REPORT.md</button>`
+    : '';
+  return `<div class="debug-stepper">${pills}${reportBtn}</div>`;
+}
+
 function renderChat() {
   if (!appState) return;
+  mermaidRegistry = [];
   const container = document.getElementById('chatInner');
   const history = appState.history || [];
 
@@ -671,16 +1201,14 @@ function renderChat() {
         <div>Model: <code>${esc(appState.model)}</code> · Mode: <strong>${esc(appState.mode)}</strong></div>
         <div class="quick-chips">
           <button class="chip" data-quick="/analyze">Analyze Project</button>
-          <button class="chip" data-quick="/debug">Debug Failure</button>
+          <button class="chip" data-quick="/debug">Multi-Agent Debug</button>
           <button class="chip" data-quick="/security">Security &amp; SOLID</button>
           <button class="chip" data-quick="/diagram">Architecture Diagram</button>
           <button class="chip" data-quick="/pr-review">PR Code Review</button>
           <button class="chip" data-quick="/sbom">Generate SBOM</button>
         </div>
       </div>`;
-    container.querySelectorAll('[data-quick]').forEach(b => {
-      b.onclick = () => sendMessage(b.dataset.quick);
-    });
+    container.querySelectorAll('[data-quick]').forEach(b => { b.onclick = () => sendMessage(b.dataset.quick); });
     return;
   }
 
@@ -703,12 +1231,23 @@ function renderChat() {
     }
   });
 
+  // Plan-Before-Code Approval Bar when in Plan mode and last turn was a model plan
+  if (!liveTurn && appState.mode === 'plan' && history.length && history[history.length - 1].role === 'model') {
+    html += `<div class="plan-bar">
+      <div><strong>Plan ready.</strong> Switch to Auto-Edit and execute this plan?</div>
+      <div style="display:flex;gap:6px;">
+        <button type="button" id="approvePlanBtn" class="btn primary sm">✓ Approve Plan &amp; Execute</button>
+      </div>
+    </div>`;
+  }
+
   if (appState.edits_count > 0 && !liveTurn) {
-    html += `<div class="checkpoint-bar"><button id="restoreChkBtn" class="checkpoint-btn">↺ Restore Checkpoint (${appState.edits_count} edit${appState.edits_count === 1 ? '' : 's'})</button></div>`;
+    html += `<div class="checkpoint-bar"><button id="restoreChkBtn" class="checkpoint-btn">↺ Undo Last Edit (${appState.edits_count} edit${appState.edits_count === 1 ? '' : 's'})</button></div>`;
   }
 
   if (liveTurn) {
     html += `<div class="msg-user-wrap"><div class="msg-user">${esc(liveTurn.userMessage)}</div><div class="msg-time">${esc(liveTurn.startedTime)}</div></div>`;
+    const dbgHtml = renderDebugStepper(liveTurn.debugPipeline);
     const stepsHtml = liveTurn.steps.length
       ? renderStepsGroup(liveTurn.steps, { live: true })
       : `<div class="steps-summary"><span class="spinner"></span> Thinking...</div>`;
@@ -724,6 +1263,7 @@ function renderChat() {
          </div>`
       : '';
     html += `<div class="msg-agent">
+      ${dbgHtml}
       ${stepsHtml}
       ${thoughtHtml}
       ${approvalHtml}
@@ -732,27 +1272,14 @@ function renderChat() {
   }
 
   container.innerHTML = html;
+  wireMermaidCards(container);
 
   container.querySelectorAll('[data-view-file]').forEach(btn => {
     btn.onclick = async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const fp = btn.dataset.viewFile;
-      await loadDrawer('files');
-      try {
-        const r = await apiGet(`/api/file?workspace=${encodeURIComponent(appState.workspace)}&path=${encodeURIComponent(fp)}`);
-        const pre = document.getElementById('filePreview');
-        if (pre) {
-          pre.style.display = 'block';
-          pre.textContent = r.content || '';
-          pre.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-      } catch (err) {
-        showToast('Could not open file: ' + err.message, true);
-      }
+      e.preventDefault(); e.stopPropagation();
+      await openFileInDrawer(btn.dataset.viewFile);
     };
   });
-
   container.querySelectorAll('[data-copy-code]').forEach(btn => {
     btn.onclick = () => {
       const pre = container.querySelector(`pre[data-code-idx="${btn.dataset.copyCode}"]`);
@@ -765,14 +1292,25 @@ function renderChat() {
     btn.onclick = () => {
       const turn = history[Number(btn.dataset.copyTurn)];
       if (turn) navigator.clipboard?.writeText(turn.text || '');
+      showToast('Copied response');
     };
   });
+  const planBtn = document.getElementById('approvePlanBtn');
+  if (planBtn) {
+    planBtn.onclick = async () => {
+      const r = await apiPost('/api/mode', { workspace: appState.workspace, mode: 'auto-edit' });
+      appState = r.state;
+      renderAll();
+      sendMessage('Proceed with implementing the approved plan step by step.');
+    };
+  }
   const chkBtn = document.getElementById('restoreChkBtn');
   if (chkBtn) {
     chkBtn.onclick = async () => {
       const r = await apiPost('/api/checkpoint/undo', { workspace: appState.workspace, count: 1 });
       appState = r.state;
       renderAll();
+      showToast(r.message || 'Undid last edit');
     };
   }
   container.querySelectorAll('[data-approve]').forEach(btn => {
@@ -793,15 +1331,10 @@ function renderAll() {
   if (drawerKind) loadDrawer(drawerKind);
 }
 
-let turnPollTimer = null;
-
+/* ---- Turn Execution, Queueing & Status Polling ---- */
 function stopTurnPoller() {
-  if (turnPollTimer) {
-    clearInterval(turnPollTimer);
-    turnPollTimer = null;
-  }
+  if (turnPollTimer) { clearInterval(turnPollTimer); turnPollTimer = null; }
 }
-
 async function finishLiveTurnFromServer(errorMsg) {
   stopTurnPoller();
   liveTurn = null;
@@ -809,49 +1342,33 @@ async function finishLiveTurnFromServer(errorMsg) {
   try {
     const fresh = await apiGet('/api/bootstrap');
     appState = fresh;
-    appState.busy = false;
+    if (!fresh.busy) appState.busy = false;
   } catch (_) {
     if (appState) appState.busy = false;
   }
   if (errorMsg) showToast('Agent error: ' + errorMsg, true);
   renderAll();
 }
-
 function upsertLiveStep(step) {
   if (!liveTurn || !step) return;
   const idx = liveTurn.steps.findIndex(s => s.id === step.id);
   if (idx >= 0) liveTurn.steps[idx] = step;
   else liveTurn.steps.push(step);
 }
-
 function startTurnPoller() {
   stopTurnPoller();
   turnPollTimer = setInterval(async () => {
-    if (!liveTurn) {
-      stopTurnPoller();
-      return;
-    }
+    if (!liveTurn) { stopTurnPoller(); return; }
     try {
       const st = await apiGet('/api/chat/status');
       if (!liveTurn) return;
-      // Sync live streamed fields & step cards even if WKWebView SSE buffers
       let changed = false;
-      if (st.text && st.text.length > (liveTurn.text || '').length) {
-        liveTurn.text = st.text;
-        changed = true;
-      }
-      if (st.thought && st.thought.length > (liveTurn.thought || '').length) {
-        liveTurn.thought = st.thought;
-        changed = true;
-      }
-      if (Array.isArray(st.steps) && JSON.stringify(st.steps) !== JSON.stringify(liveTurn.steps)) {
-        liveTurn.steps = st.steps;
-        changed = true;
-      }
-      if (st.pending_approval && (!pendingApproval || pendingApproval.id !== st.pending_approval.id)) {
-        pendingApproval = st.pending_approval;
-        changed = true;
-      }
+      if (st.text && st.text.length > (liveTurn.text || '').length) { liveTurn.text = st.text; changed = true; }
+      if (st.thought && st.thought.length > (liveTurn.thought || '').length) { liveTurn.thought = st.thought; changed = true; }
+      if (Array.isArray(st.steps) && JSON.stringify(st.steps) !== JSON.stringify(liveTurn.steps)) { liveTurn.steps = st.steps; changed = true; }
+      if (st.debug_pipeline && JSON.stringify(st.debug_pipeline) !== JSON.stringify(liveTurn.debugPipeline)) { liveTurn.debugPipeline = st.debug_pipeline; changed = true; }
+      if (st.pending_approval && (!pendingApproval || pendingApproval.id !== st.pending_approval.id)) { pendingApproval = st.pending_approval; changed = true; }
+      if (appState && Array.isArray(st.queued_messages)) { appState.queued_messages = st.queued_messages; renderChipsAndQueue(); }
       if (changed) renderChat();
 
       const expectedId = liveTurn.turnId || 0;
@@ -862,12 +1379,45 @@ function startTurnPoller() {
   }, 400);
 }
 
+function buildFinalPrompt(rawText) {
+  const prefixes = attachedItems.map(it => '@' + it.path);
+  return [...prefixes, rawText].filter(Boolean).join(' ').trim();
+}
+
 async function sendMessage(overrideText) {
   const input = document.getElementById('promptInput');
-  const msg = (overrideText ?? input.value).trim();
+  const raw = (overrideText ?? input.value).trim();
+  const msg = overrideText ? raw : buildFinalPrompt(raw);
   if (!msg) return;
-  if (!overrideText) input.value = '';
-  liveTurn = { turnId: 0, userMessage: msg, startedTime: nowTime(), steps: [], thought: '', text: '' };
+  if (!overrideText) {
+    input.value = '';
+    attachedItems = [];
+    closeAutocomplete();
+    renderChipsAndQueue();
+  }
+  // If agent is busy, queue the message instead of failing!
+  if (appState?.busy || liveTurn) {
+    try {
+      const qr = await apiPost('/api/chat/queue', { workspace: appState.workspace, message: msg });
+      if (qr.queued) {
+        if (appState) appState.queued_messages = qr.queued_messages || [];
+        renderChipsAndQueue();
+        showToast('Queued instruction — will run automatically next');
+        return;
+      }
+    } catch (err) { showToast(err.message, true); return; }
+  }
+  liveTurn = {
+    turnId: 0,
+    userMessage: msg,
+    startedTime: nowTime(),
+    steps: [],
+    thought: '',
+    text: '',
+    debugPipeline: msg.toLowerCase().startsWith('/debug')
+      ? { active: true, stage: 0, stages: ['Log Analyst', 'Root Cause', 'Fix Engineer', 'Verifier'], report_exists: false }
+      : null,
+  };
   renderAll();
   try {
     const r = await apiPost('/api/chat/send', { workspace: appState.workspace, message: msg });
@@ -881,7 +1431,122 @@ async function sendMessage(overrideText) {
   }
 }
 
+/* ---- Inline `/` & `@file` Autocomplete ---- */
+function closeAutocomplete() {
+  acMode = null; acItems = []; acIndex = 0;
+  document.getElementById('acMenu').classList.remove('open');
+}
+async function ensureWsFilesCached() {
+  if (!appState) return [];
+  if (cachedWsFilesRoot === appState.workspace && cachedWsFiles.length) return cachedWsFiles;
+  const d = await apiGet('/api/files?workspace=' + encodeURIComponent(appState.workspace));
+  cachedWsFiles = d.files || [];
+  cachedWsFilesRoot = appState.workspace;
+  return cachedWsFiles;
+}
+function renderAcMenu() {
+  const menu = document.getElementById('acMenu');
+  if (!acItems.length) { closeAutocomplete(); return; }
+  menu.innerHTML = acItems.map((it, idx) => `
+    <div class="ac-item ${idx === acIndex ? 'sel' : ''}" data-ac-idx="${idx}">
+      <code>${esc(it.label)}</code>
+      <span style="font-size:11.5px;color:var(--muted);">${esc(it.detail || '')}</span>
+    </div>`).join('');
+  menu.classList.add('open');
+  menu.querySelectorAll('[data-ac-idx]').forEach(el => {
+    el.onmousedown = (e) => { e.preventDefault(); applyAcItem(Number(el.dataset.acIdx)); };
+  });
+}
+function applyAcItem(idx) {
+  const it = acItems[idx];
+  if (!it) return;
+  const inp = document.getElementById('promptInput');
+  if (acMode === 'cmd') {
+    inp.value = it.value + ' ';
+  } else if (acMode === 'file') {
+    inp.value = inp.value.replace(/@[^\s]*$/, '');
+    if (!attachedItems.some(a => a.path === it.value)) {
+      attachedItems.push({ type: 'file', path: it.value });
+      renderChipsAndQueue();
+    }
+  }
+  closeAutocomplete();
+  inp.focus();
+}
+async function updateAutocomplete() {
+  const inp = document.getElementById('promptInput');
+  const val = inp.value;
+  if (val.startsWith('/') && !val.includes(' ')) {
+    const q = val.toLowerCase();
+    acMode = 'cmd';
+    acItems = (appState?.commands || [])
+      .filter(c => c.name.toLowerCase().startsWith(q))
+      .slice(0, 12)
+      .map(c => ({ label: c.name, value: c.name, detail: c.args || (c.custom ? 'custom' : '') }));
+    acIndex = 0;
+    renderAcMenu();
+    return;
+  }
+  const atMatch = val.match(/(?:^|\s)@([^\s]*)$/);
+  if (atMatch) {
+    const q = atMatch[1].toLowerCase();
+    acMode = 'file';
+    const files = await ensureWsFilesCached();
+    acItems = files
+      .filter(f => !q || f.toLowerCase().includes(q))
+      .slice(0, 12)
+      .map(f => ({ label: '@' + f, value: f, detail: 'attach file' }));
+    acIndex = 0;
+    renderAcMenu();
+    return;
+  }
+  closeAutocomplete();
+}
+
+/* ---- Image Paste & Drag-Drop ---- */
+async function uploadImageFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const dataUrl = String(reader.result || '');
+      const r = await apiPost('/api/chat/upload-image', {
+        workspace: appState.workspace,
+        filename: file.name || 'paste.png',
+        data_url: dataUrl,
+      });
+      attachedItems.push({ type: 'image', path: r.path, preview: dataUrl });
+      renderChipsAndQueue();
+      showToast('Attached image: ' + r.path);
+    } catch (err) { showToast('Image upload failed: ' + err.message, true); }
+  };
+  reader.readAsDataURL(file);
+}
+
+/* ---- Right Drawers ---- */
+async function openFileInDrawer(fp) {
+  await loadDrawer('files');
+  try {
+    const r = await apiGet(`/api/file?workspace=${encodeURIComponent(appState.workspace)}&path=${encodeURIComponent(fp)}`);
+    const box = document.getElementById('filePreviewBox');
+    const pre = document.getElementById('filePreview');
+    const lbl = document.getElementById('filePreviewPath');
+    if (box && pre && lbl) {
+      box.style.display = 'block';
+      lbl.textContent = fp;
+      lbl.dataset.path = fp;
+      pre.innerHTML = highlightCodeBlock(r.content || '', true);
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  } catch (err) { showToast('Could not open file: ' + err.message, true); }
+}
+
+function stopTermPoller() {
+  if (termPollTimer) { clearInterval(termPollTimer); termPollTimer = null; }
+}
+
 async function loadDrawer(kind) {
+  if (kind !== 'terminal') stopTermPoller();
   drawerKind = kind;
   const drawer = document.getElementById('rightDrawer');
   drawer.classList.add('open');
@@ -892,44 +1557,104 @@ async function loadDrawer(kind) {
   if (kind === 'files') {
     title.textContent = 'Workspace Files';
     const d = await apiGet('/api/files?workspace=' + encodeURIComponent(ws));
-    body.innerHTML = `<input id="fileFilter" placeholder="Filter files..." style="width:100%;padding:6px 9px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;" />
-      <div id="fileList"></div><pre id="filePreview" style="display:none;margin-top:10px;padding:10px;background:#fff;border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:420px;font-family:var(--mono);font-size:11.5px;"></pre>`;
+    body.innerHTML = `<input id="fileFilter" placeholder="Filter files..." style="width:100%;padding:6px 9px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;margin-bottom:8px;" />
+      <div id="fileList" style="max-height:240px;overflow-y:auto;"></div>
+      <div id="filePreviewBox" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--surface);border-bottom:1px solid var(--border);font-size:11.5px;">
+          <strong id="filePreviewPath" style="font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;"></strong>
+          <button type="button" id="pinFileDrawerBtn" class="btn sm">📌 Pin</button>
+        </div>
+        <pre id="filePreview" class="step-code" style="max-height:380px;border-top:none;"></pre>
+      </div>`;
+    document.getElementById('pinFileDrawerBtn').onclick = async () => {
+      const fp = document.getElementById('filePreviewPath').dataset.path;
+      if (!fp) return;
+      try {
+        const r = await apiPost('/api/context/pin', { workspace: ws, path: fp });
+        appState = r.state;
+        renderTopAndSidebar();
+        showToast('Pinned ' + fp);
+      } catch (err) { showToast(err.message, true); }
+    };
     const renderList = (q) => {
       const fl = (d.files || []).filter(f => !q || f.toLowerCase().includes(q.toLowerCase())).slice(0, 150);
-      document.getElementById('fileList').innerHTML = fl.map(f => `<div class="file-row" data-fpath="${esc(f)}">${esc(f)}</div>`).join('');
+      document.getElementById('fileList').innerHTML = fl.map(f => `<div class="file-row" data-fpath="${esc(f)}"><span>${esc(f)}</span></div>`).join('');
       document.querySelectorAll('[data-fpath]').forEach(row => {
-        row.onclick = async () => {
-          const r = await apiGet(`/api/file?workspace=${encodeURIComponent(ws)}&path=${encodeURIComponent(row.dataset.fpath)}`);
-          const pre = document.getElementById('filePreview');
-          pre.style.display = 'block';
-          pre.textContent = r.content || '';
-        };
+        row.onclick = () => openFileInDrawer(row.dataset.fpath);
       });
     };
     renderList('');
     document.getElementById('fileFilter').oninput = (e) => renderList(e.target.value);
+
   } else if (kind === 'diff') {
-    title.textContent = 'Git Diff';
+    title.textContent = 'Git Diff & Commit';
     const d = await apiGet('/api/diff?workspace=' + encodeURIComponent(ws));
-    const colored = (d.diff || 'No uncommitted changes.').split('\n').map(ln => {
-      if (ln.startsWith('+') && !ln.startsWith('+++')) return `<span class="diff-line-add">${esc(ln)}</span>`;
-      if (ln.startsWith('-') && !ln.startsWith('---')) return `<span class="diff-line-del">${esc(ln)}</span>`;
-      return esc(ln) + '\n';
-    }).join('');
-    body.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span><span class="diff-add">+${d.added || 0}</span> <span class="diff-del">-${d.deleted || 0}</span></span>
-        <button id="reviewDiffBtn" class="btn primary">PR Review</button>
+    const files = d.files || [];
+    const filesHtml = files.length
+      ? files.map((f, idx) => {
+          const colored = (f.diff || '').split('\n').map(ln => {
+            if (ln.startsWith('+') && !ln.startsWith('+++')) return `<span class="diff-line-add">${esc(ln)}</span>`;
+            if (ln.startsWith('-') && !ln.startsWith('---')) return `<span class="diff-line-del">${esc(ln)}</span>`;
+            return esc(ln) + '\n';
+          }).join('');
+          return `<details class="step-card" style="margin-bottom:8px;" ${idx === 0 ? 'open' : ''}>
+            <summary class="step-card-head">
+              <div class="step-card-left"><span class="badge">${esc(f.status)}</span><span class="step-card-path">${esc(f.path)}</span></div>
+              <div class="step-card-right">
+                <span class="diff-add">+${f.added}</span><span class="diff-del">-${f.deleted}</span>
+                <button type="button" class="btn sm danger" data-revert-file="${esc(f.path)}">Revert</button>
+              </div>
+            </summary>
+            <pre class="step-code" style="max-height:220px;">${colored || '(binary or empty diff)'}</pre>
+          </details>`;
+        }).join('')
+      : '<div style="font-size:12.5px;color:var(--muted);padding:12px 0;">No uncommitted changes.</div>';
+    body.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
+        <span><span class="diff-add">+${d.added || 0}</span> <span class="diff-del">-${d.deleted || 0}</span> · ${files.length} file(s)</span>
+        <div style="display:flex;gap:6px;">
+          <button id="aiCommitBtn" class="btn sm primary">✨ AI Commit</button>
+          <button id="reviewDiffBtn" class="btn sm">PR Review</button>
+        </div>
       </div>
-      <pre style="margin:0;padding:10px;background:#fff;border:1px solid var(--border);border-radius:8px;overflow:auto;font-family:var(--mono);font-size:11.5px;">${colored}</pre>`;
+      <div style="display:flex;gap:6px;margin-bottom:12px;">
+        <input id="commitMsgInput" placeholder="Commit message (or click AI Commit)..." style="flex:1;padding:6px 9px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;font-size:12px;" />
+        <button id="manualCommitBtn" class="btn sm">Commit</button>
+      </div>
+      ${filesHtml}`;
     document.getElementById('reviewDiffBtn').onclick = () => sendMessage('/pr-review');
+    document.getElementById('aiCommitBtn').onclick = () => sendMessage('/commit');
+    document.getElementById('manualCommitBtn').onclick = async () => {
+      const msg = document.getElementById('commitMsgInput').value.trim();
+      if (!msg) { sendMessage('/commit'); return; }
+      try {
+        const r = await apiPost('/api/git/commit', { workspace: ws, message: msg });
+        if (r.state) appState = r.state;
+        renderAll();
+        showToast('Committed changes');
+      } catch (err) { showToast('Commit failed: ' + err.message, true); }
+    };
+    body.querySelectorAll('[data-revert-file]').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.preventDefault(); e.stopPropagation();
+        try {
+          const r = await apiPost('/api/git/revert-file', { workspace: ws, path: btn.dataset.revertFile });
+          appState = r.state;
+          renderAll();
+          showToast('Reverted ' + btn.dataset.revertFile);
+        } catch (err) { showToast('Revert failed: ' + err.message, true); }
+      };
+    });
+
   } else if (kind === 'inspector') {
-    title.textContent = 'Inspector (Offline)';
+    title.textContent = 'Inspector & Checkpoints';
     body.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
-        <button id="insSecBtn" class="btn primary">Security &amp; SOLID</button>
-        <button id="insDiagBtn" class="btn">Diagram &amp; APIs</button>
-        <button id="insSbomBtn" class="btn">SBOM</button>
+        <button id="insSecBtn" class="btn sm primary">Security</button>
+        <button id="insDiagBtn" class="btn sm">Diagram SVG</button>
+        <button id="insSbomBtn" class="btn sm">SBOM</button>
+        <button id="insChkBtn" class="btn sm">Checkpoints</button>
       </div>
-      <div id="insOut" style="font-size:12.5px;color:var(--muted);">Click a tool above to inspect this workspace offline.</div>`;
+      <div id="insOut" style="font-size:12.5px;color:var(--muted);">Select a tool above to inspect this workspace offline.</div>`;
+
     document.getElementById('insSecBtn').onclick = async () => {
       const r = await apiPost('/api/tools/security', { workspace: ws });
       const fs = r.security?.findings || [];
@@ -939,47 +1664,309 @@ async function loadDrawer(kind) {
     };
     document.getElementById('insDiagBtn').onclick = async () => {
       const r = await apiPost('/api/tools/diagram', { workspace: ws });
-      document.getElementById('insOut').innerHTML = `<div><strong>${r.files_count}</strong> files · <strong>${(r.routes||[]).length}</strong> routes · <strong>${(r.cycles||[]).length}</strong> cycles</div>
-        <pre style="white-space:pre-wrap;background:#fff;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:8px;">${esc(r.mermaid || '')}</pre>`;
+      const out = document.getElementById('insOut');
+      const mMatch = (r.mermaid || '').match(/```mermaid\n([\s\S]*?)```/);
+      const mCode = mMatch ? mMatch[1] : '';
+      const mCard = mCode ? buildMermaidCardHtml(mCode, mermaidRegistry.length) : '';
+      out.innerHTML = `<div style="margin-bottom:8px;"><strong>${r.files_count}</strong> files · <strong>${(r.routes||[]).length}</strong> routes · <strong>${(r.cycles||[]).length}</strong> cycles</div>` +
+        (mCard || `<pre class="step-code">${esc(r.mermaid || '')}</pre>`);
+      wireMermaidCards(out);
     };
     document.getElementById('insSbomBtn').onclick = async () => {
       const r = await apiPost('/api/tools/sbom', { workspace: ws, fmt: 'cyclonedx' });
       document.getElementById('insOut').innerHTML = `<div><strong>${r.total}</strong> dependencies (${esc(r.format)})</div>` +
         (r.components || []).slice(0, 60).map(c => `<div style="padding:4px 0;border-bottom:1px solid var(--border);"><code>${esc(c.name)}</code> ${esc(c.version)} · ${esc(c.license)}</div>`).join('');
     };
+    const renderCheckpoints = async () => {
+      const d = await apiGet('/api/checkpoints?workspace=' + encodeURIComponent(ws));
+      const out = document.getElementById('insOut');
+      const listHtml = (d.checkpoints || []).length
+        ? d.checkpoints.map(c => `<div class="profile-row">
+            <div style="min-width:0;">
+              <div style="font-weight:600;">${esc(c.label)}</div>
+              <div style="font-size:11px;color:var(--muted);"><code>${esc(c.id)}</code> · ${esc(c.branch)} @ ${esc(c.commit)}</div>
+            </div>
+            <div style="display:flex;gap:4px;">
+              <button type="button" class="btn sm primary" data-chk-restore="${esc(c.id)}">Restore</button>
+              <button type="button" class="btn sm danger" data-chk-del="${esc(c.id)}">✕</button>
+            </div>
+          </div>`).join('')
+        : '<div style="color:var(--muted);margin-top:8px;">No Git checkpoints saved yet.</div>';
+      out.innerHTML = `
+        <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
+          <span>Edits undo stack: <strong>${d.edits_count || 0}</strong></span>
+          ${d.edits_count ? `<button type="button" id="undoEditStepBtn" class="btn sm">↺ Undo 1</button>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <input id="chkLabelInput" placeholder="Checkpoint label..." style="flex:1;padding:5px 8px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:7px;font-size:12px;" />
+          <button type="button" id="createChkBtn" class="btn sm primary" ${d.is_git_repo ? '' : 'disabled'}>Save Git Snapshot</button>
+        </div>
+        ${listHtml}`;
+      document.getElementById('undoEditStepBtn')?.addEventListener('click', async () => {
+        const r = await apiPost('/api/checkpoint/undo', { workspace: ws, count: 1 });
+        appState = r.state; renderAll(); showToast(r.message);
+      });
+      document.getElementById('createChkBtn')?.addEventListener('click', async () => {
+        try {
+          await apiPost('/api/checkpoints/create', { workspace: ws, label: document.getElementById('chkLabelInput').value.trim() || 'snapshot' });
+          showToast('Saved Git checkpoint');
+          renderCheckpoints();
+        } catch (err) { showToast(err.message, true); }
+      });
+      out.querySelectorAll('[data-chk-restore]').forEach(b => {
+        b.onclick = async () => {
+          try {
+            const r = await apiPost('/api/checkpoints/restore', { workspace: ws, id: b.dataset.chkRestore });
+            appState = r.state; renderAll(); showToast(r.message);
+          } catch (err) { showToast(err.message, true); }
+        };
+      });
+      out.querySelectorAll('[data-chk-del]').forEach(b => {
+        b.onclick = async () => {
+          try {
+            await apiPost('/api/checkpoints/delete', { workspace: ws, id: b.dataset.chkDel });
+            renderCheckpoints();
+          } catch (err) { showToast(err.message, true); }
+        };
+      });
+    };
+    document.getElementById('insChkBtn').onclick = renderCheckpoints;
+
   } else if (kind === 'terminal') {
-    title.textContent = 'Workspace Terminal';
-    body.innerHTML = `<div style="display:flex;gap:6px;margin-bottom:8px;">
-        <input id="termCmd" placeholder="e.g. pytest -q or mvn -B test" value="${esc(appState.test_command || '')}" style="flex:1;padding:6px 9px;border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:12px;" />
-        <button id="termRunBtn" class="btn primary">Run</button>
+    title.textContent = 'Streaming Terminal & Watch';
+    const ts = await apiGet('/api/terminal/status');
+    const w = await apiGet('/api/watch/status');
+    body.innerHTML = `
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input id="termCmd" placeholder="e.g. pytest -q or mvn -B test" value="${esc(ts.command || appState.test_command || '')}" style="flex:1;padding:6px 9px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;font-family:var(--mono);font-size:12px;" />
+        <button id="termRunBtn" class="btn sm primary">Run</button>
+        <button id="termStopBtn" class="btn sm danger" style="${ts.running ? '' : 'display:none;'}">Stop</button>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);margin-bottom:8px;font-size:12px;">
+        <span id="watchDrawerStatus">${w.running ? `👁 Watching (${esc(w.last_status)} · ${w.run_count} runs)` : '👁 Auto-Test Watch: Off'}</span>
+        <div style="display:flex;gap:6px;">
+          ${w.last_status === 'fail' ? '<button id="watchAutoFixBtn" class="btn sm danger">Auto-Fix</button>' : ''}
+          <button id="watchToggleBtn" class="btn sm ${w.running ? 'danger' : ''}">${w.running ? 'Stop Watch' : 'Start Watch'}</button>
+        </div>
       </div>
       <div id="termActionBar" style="margin-bottom:8px;"></div>
-      <pre id="termOut" style="margin:0;padding:10px;background:#0d1117;color:#e6edf3;border-radius:8px;overflow:auto;min-height:220px;max-height:520px;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;">Ready.</pre>`;
+      <pre id="termOut" class="step-shell" style="min-height:260px;max-height:540px;border-radius:8px;">${ts.output ? renderAnsi(ts.output) : 'Ready.'}</pre>`;
+
+    const updateTermUI = (st) => {
+      const outEl = document.getElementById('termOut');
+      const stopBtn = document.getElementById('termStopBtn');
+      const bar = document.getElementById('termActionBar');
+      if (!outEl) { stopTermPoller(); return; }
+      outEl.innerHTML = st.output ? renderAnsi(st.output) : (st.running ? 'Running...' : 'Ready.');
+      outEl.scrollTop = outEl.scrollHeight;
+      if (stopBtn) stopBtn.style.display = st.running ? 'inline-block' : 'none';
+      if (bar) {
+        if (st.running) bar.innerHTML = '<span class="spinner"></span> Running live...';
+        else if (st.exit_code === 0) bar.innerHTML = '<span class="diff-add">✓ Exit 0</span>';
+        else if (st.exit_code !== null && st.exit_code !== undefined) {
+          bar.innerHTML = `<span class="diff-del">✕ Exit ${st.exit_code}</span> <button id="debugFailBtn" class="btn sm danger">Debug &amp; Fix with Agent</button>`;
+          document.getElementById('debugFailBtn').onclick = () => sendMessage(`/debug --cmd "${st.command}"`);
+        }
+      }
+      if (!st.running) stopTermPoller();
+    };
+    const startTermPoll = () => {
+      stopTermPoller();
+      termPollTimer = setInterval(async () => {
+        try { updateTermUI(await apiGet('/api/terminal/status')); } catch (_) {}
+      }, 350);
+    };
+    if (ts.running) startTermPoll();
+
     const runCmd = async () => {
       const cmd = document.getElementById('termCmd').value.trim();
       if (!cmd) return;
-      document.getElementById('termOut').textContent = 'Running: ' + cmd + '...';
-      const r = await apiPost('/api/terminal/run', { workspace: ws, command: cmd });
-      document.getElementById('termOut').textContent = `Exit ${r.exit_code}\n\n${r.output || ''}`;
-      document.getElementById('termActionBar').innerHTML = r.ok
-        ? '<span class="diff-add">✓ Command passed</span>'
-        : `<button id="debugFailBtn" class="btn danger">Debug &amp; Fix with Agent</button>`;
-      const db = document.getElementById('debugFailBtn');
-      if (db) db.onclick = () => sendMessage(`/debug --cmd "${cmd}"`);
+      try {
+        const r = await apiPost('/api/terminal/start', { workspace: ws, command: cmd });
+        updateTermUI(r.terminal);
+        startTermPoll();
+      } catch (err) { showToast(err.message, true); }
     };
     document.getElementById('termRunBtn').onclick = runCmd;
+    document.getElementById('termStopBtn').onclick = async () => {
+      const r = await apiPost('/api/terminal/stop', {});
+      updateTermUI(r.terminal);
+    };
     document.getElementById('termCmd').onkeydown = (e) => { if (e.key === 'Enter') runCmd(); };
+    document.getElementById('watchAutoFixBtn')?.addEventListener('click', () => sendMessage(`/debug --cmd "${w.command}"`));
+    document.getElementById('watchToggleBtn').onclick = async () => {
+      try {
+        if (w.running) {
+          const r = await apiPost('/api/watch/stop', {});
+          appState.watch = r.watch;
+        } else {
+          const cmd = document.getElementById('termCmd').value.trim() || appState.test_command;
+          const r = await apiPost('/api/watch/start', { workspace: ws, command: cmd });
+          appState.watch = r.watch;
+        }
+        renderWatchPill(appState.watch);
+        loadDrawer('terminal');
+      } catch (err) { showToast(err.message, true); }
+    };
   }
 }
 
-async function openCustomizationsModal() {
+/* ---- Context & Token Meter Modal ---- */
+function openContextModal() {
   const modalBg = document.getElementById('modalBg');
-  document.getElementById('modalTitle').textContent = 'Customizations — Provider Settings & Profiles';
+  document.getElementById('modalTitle').textContent = 'Context, Tokens & Pinned Files';
+  const ctx = appState.context || {};
+  const pinned = appState.pinned || [];
   const body = document.getElementById('modalBody');
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;">
+      <div class="profile-row" style="flex-direction:column;align-items:flex-start;gap:2px;">
+        <span style="font-size:11px;color:var(--muted);">Context Used</span>
+        <strong>${(ctx.used || 0).toLocaleString()} / ${(ctx.limit || 0).toLocaleString()} (${ctx.percent || 0}%)</strong>
+      </div>
+      <div class="profile-row" style="flex-direction:column;align-items:flex-start;gap:2px;">
+        <span style="font-size:11px;color:var(--muted);">Session Tokens</span>
+        <strong>${(ctx.total_tokens || 0).toLocaleString()} (in ${(ctx.prompt_tokens || 0).toLocaleString()} / out ${(ctx.output_tokens || 0).toLocaleString()})</strong>
+      </div>
+      <div class="profile-row" style="flex-direction:column;align-items:flex-start;gap:2px;">
+        <span style="font-size:11px;color:var(--muted);">LLM Calls</span>
+        <strong>${ctx.calls || 0}</strong>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button type="button" id="compactCtxBtn" class="btn primary">🗜 Compact Context (/compact)</button>
+      ${pinned.length ? '<button type="button" id="unpinAllBtn" class="btn">Unpin All</button>' : ''}
+    </div>
+    <div style="font-weight:600;margin-bottom:8px;">Pinned Files (${pinned.length})</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <input id="pinPathInput" placeholder="Relative path (e.g. src/app.py)" style="flex:1;padding:6px 9px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;font-family:var(--mono);font-size:12px;" />
+      <button type="button" id="pinAddBtn" class="btn">Pin File</button>
+    </div>
+    <div>${pinned.length ? pinned.map(p => `<div class="profile-row"><code>${esc(p)}</code><button type="button" class="btn sm" data-unpin="${esc(p)}">Unpin</button></div>`).join('') : '<div style="font-size:12.5px;color:var(--muted);">No pinned files.</div>'}</div>`;
+  document.getElementById('compactCtxBtn').onclick = () => { modalBg.classList.remove('open'); sendMessage('/compact'); };
+  document.getElementById('unpinAllBtn')?.addEventListener('click', async () => {
+    const r = await apiPost('/api/context/unpin', { workspace: appState.workspace, path: 'all' });
+    appState = r.state; renderTopAndSidebar(); openContextModal();
+  });
+  document.getElementById('pinAddBtn').onclick = async () => {
+    const p = document.getElementById('pinPathInput').value.trim();
+    if (!p) return;
+    try {
+      const r = await apiPost('/api/context/pin', { workspace: appState.workspace, path: p });
+      appState = r.state; renderTopAndSidebar(); openContextModal();
+    } catch (err) { showToast(err.message, true); }
+  };
+  body.querySelectorAll('[data-unpin]').forEach(btn => {
+    btn.onclick = async () => {
+      const r = await apiPost('/api/context/unpin', { workspace: appState.workspace, path: btn.dataset.unpin });
+      appState = r.state; renderTopAndSidebar(); openContextModal();
+    };
+  });
+  modalBg.classList.add('open');
+}
+
+/* ---- Rename Session Modal ---- */
+function openRenameSessionModal(wsPath, sid, currentName) {
+  const modalBg = document.getElementById('modalBg');
+  document.getElementById('modalTitle').textContent = 'Rename Session';
+  document.getElementById('modalBody').innerHTML = `
+    <div style="display:flex;gap:8px;">
+      <input id="renSessInp" value="${esc(currentName)}" style="flex:1;padding:7px 10px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;" />
+      <button type="button" id="renSessSave" class="btn primary">Save</button>
+    </div>`;
+  const save = async () => {
+    const name = document.getElementById('renSessInp').value.trim();
+    if (!name) return;
+    try {
+      const r = await apiPost('/api/session/rename', { workspace: wsPath, session_id: sid, name });
+      appState = r.state;
+      modalBg.classList.remove('open');
+      renderTopAndSidebar();
+      showToast('Renamed session');
+    } catch (err) { showToast(err.message, true); }
+  };
+  document.getElementById('renSessSave').onclick = save;
+  document.getElementById('renSessInp').onkeydown = (e) => { if (e.key === 'Enter') save(); };
+  modalBg.classList.add('open');
+  setTimeout(() => document.getElementById('renSessInp')?.select(), 40);
+}
+
+/* ---- Customizations Modal (Tabbed: Provider & Profiles | Extensions) ---- */
+async function openCustomizationsModal(activeTab = 'provider') {
+  const modalBg = document.getElementById('modalBg');
+  document.getElementById('modalTitle').textContent = 'Customizations';
+  const body = document.getElementById('modalBody');
+  const tabsHtml = `<div class="tab-bar">
+    <button type="button" class="tab-btn ${activeTab === 'provider' ? 'active' : ''}" data-ctab="provider">Provider &amp; Profiles</button>
+    <button type="button" class="tab-btn ${activeTab === 'extensions' ? 'active' : ''}" data-ctab="extensions">Skills, Commands, Hooks &amp; MCP</button>
+  </div>`;
+
+  if (activeTab === 'extensions') {
+    const ext = await apiGet('/api/extensions?workspace=' + encodeURIComponent(appState.workspace));
+    const hooks = ext.hooks || {};
+    const mcpEntries = Object.entries(ext.mcp_servers || {});
+    body.innerHTML = `${tabsHtml}
+      <div style="font-weight:600;margin-bottom:6px;">Workspace Skills (${(ext.skills || []).length})</div>
+      <div style="margin-bottom:14px;">${(ext.skills || []).length ? ext.skills.map(s => `<div class="profile-row"><div><strong>${esc(s.name)}</strong><div style="font-size:11.5px;color:var(--muted);">${esc(s.description)}</div></div><button type="button" class="btn sm" data-run-skill="${esc(s.name)}">Run</button></div>`).join('') : '<div style="font-size:12px;color:var(--muted);">Place SKILL.md files under <code>.agent/skills/&lt;name&gt;/SKILL.md</code>.</div>'}</div>
+
+      <div style="font-weight:600;margin-bottom:6px;">Custom Slash Commands (${(ext.commands || []).length})</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input id="extCmdName" placeholder="Command name (e.g. deploy)" style="width:180px;padding:6px 9px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;font-size:12px;" />
+        <input id="extCmdBody" placeholder="Prompt template ($ARGUMENTS)" style="flex:1;padding:6px 9px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;font-size:12px;" />
+        <button type="button" id="extCmdAdd" class="btn sm primary">Add</button>
+      </div>
+      <div style="margin-bottom:14px;">${(ext.commands || []).map(c => `<span class="badge" style="margin-right:6px;">/${esc(c.name)}</span>`).join('') || '<span style="font-size:12px;color:var(--muted);">None yet.</span>'}</div>
+
+      <div style="font-weight:600;margin-bottom:6px;">Lifecycle Hooks (.agent/hooks.json)</div>
+      <div class="form-grid" style="margin-bottom:10px;">
+        ${(ext.hook_events || []).map(ev => `<div class="field"><label>${esc(ev)} (1 cmd per line)</label><textarea rows="2" data-hook-ev="${esc(ev)}">${esc((hooks[ev] || []).join('\n'))}</textarea></div>`).join('')}
+      </div>
+      <button type="button" id="extHooksSave" class="btn sm primary" style="margin-bottom:16px;">Save Hooks</button>
+
+      <div style="font-weight:600;margin-bottom:6px;">MCP Servers (.agent/mcp.json)</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input id="mcpName" placeholder="name" style="width:120px;padding:6px 9px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;font-size:12px;" />
+        <input id="mcpCmd" placeholder="command (e.g. npx)" style="width:140px;padding:6px 9px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;font-size:12px;" />
+        <input id="mcpArgs" placeholder="args (space-separated)" style="flex:1;padding:6px 9px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;font-size:12px;" />
+        <button type="button" id="mcpAddBtn" class="btn sm primary">Add</button>
+      </div>
+      <div>${mcpEntries.length ? mcpEntries.map(([name, cfg]) => `<div class="profile-row"><div><strong>${esc(name)}</strong> <code>${esc(cfg.command)} ${esc((cfg.args || []).join(' '))}</code></div><button type="button" class="btn sm danger" data-mcp-del="${esc(name)}">Remove</button></div>`).join('') : '<div style="font-size:12px;color:var(--muted);">No MCP servers configured.</div>'}</div>`;
+
+    body.querySelectorAll('[data-ctab]').forEach(b => { b.onclick = () => openCustomizationsModal(b.dataset.ctab); });
+    body.querySelectorAll('[data-run-skill]').forEach(b => { b.onclick = () => { modalBg.classList.remove('open'); sendMessage('/skill ' + b.dataset.runSkill); }; });
+    document.getElementById('extCmdAdd').onclick = async () => {
+      try {
+        const r = await apiPost('/api/extensions/command', { workspace: appState.workspace, name: document.getElementById('extCmdName').value, body: document.getElementById('extCmdBody').value });
+        appState = r.state; renderTopAndSidebar(); openCustomizationsModal('extensions'); showToast('Saved custom command');
+      } catch (err) { showToast(err.message, true); }
+    };
+    document.getElementById('extHooksSave').onclick = async () => {
+      const next = {};
+      body.querySelectorAll('[data-hook-ev]').forEach(ta => {
+        next[ta.dataset.hookEv] = ta.value.split('\n').map(s => s.trim()).filter(Boolean);
+      });
+      await apiPost('/api/extensions/hooks', { workspace: appState.workspace, hooks: next });
+      showToast('Saved hooks');
+    };
+    document.getElementById('mcpAddBtn').onclick = async () => {
+      try {
+        await apiPost('/api/extensions/mcp/add', { workspace: appState.workspace, name: document.getElementById('mcpName').value, command: document.getElementById('mcpCmd').value, args: document.getElementById('mcpArgs').value });
+        openCustomizationsModal('extensions'); showToast('Added MCP server');
+      } catch (err) { showToast(err.message, true); }
+    };
+    body.querySelectorAll('[data-mcp-del]').forEach(b => {
+      b.onclick = async () => {
+        await apiPost('/api/extensions/mcp/remove', { workspace: appState.workspace, name: b.dataset.mcpDel });
+        openCustomizationsModal('extensions'); showToast('Removed MCP server');
+      };
+    });
+    modalBg.classList.add('open');
+    return;
+  }
+
   const st = await apiGet('/api/state?workspace=' + encodeURIComponent(appState.workspace));
   const prof = await apiGet('/api/profiles');
   const profNames = Object.keys(prof.profiles || {}).sort();
-
   const profilesListHtml = profNames.length
     ? profNames.map(n => {
         const p = (prof.profiles || {})[n] || {};
@@ -992,20 +1979,20 @@ async function openCustomizationsModal() {
             <div style="font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;"><code>${esc(p.model || '')}</code> · ${esc(p.provider || '')} · mode: ${esc(p.mode || 'ask')}</div>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0;">
-            <button type="button" class="btn primary" data-use-prof="${esc(n)}">Use</button>
-            <button type="button" class="btn danger" data-del-prof="${esc(n)}">Delete</button>
+            <button type="button" class="btn sm primary" data-use-prof="${esc(n)}">Use</button>
+            <button type="button" class="btn sm danger" data-del-prof="${esc(n)}">Delete</button>
           </div>
         </div>`;
       }).join('')
     : '<div style="font-size:12.5px;color:var(--muted);">No saved profiles yet.</div>';
 
-  body.innerHTML = `
+  body.innerHTML = `${tabsHtml}
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--sidebar);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;">
       <div style="min-width:0;">
         <div style="font-size:11px;color:var(--muted);">Active Workspace</div>
         <div style="font-family:var(--mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(appState.workspace)}</div>
       </div>
-      <button type="button" id="cSwitchWsBtn" class="btn">Switch…</button>
+      <button type="button" id="cSwitchWsBtn" class="btn sm">Switch…</button>
     </div>
     <div class="form-grid">
       <div class="field"><label>Provider</label>
@@ -1014,7 +2001,7 @@ async function openCustomizationsModal() {
       <div class="field"><label>Execution Mode</label>
         <select id="cMode">${['ask','auto-edit','plan','full-auto'].map(m => `<option ${m===st.mode?'selected':''}>${m}</option>`).join('')}</select>
       </div>
-      <div class="field full"><label>Base URL</label><input id="cBase" value="${esc(st.base_url || '')}" placeholder="https://.../v1 or http://127.0.0.1:11434" /></div>
+      <div class="field full"><label>Base URL</label><input id="cBase" value="${esc(st.base_url || '')}" /></div>
       <div class="field full"><label>Model ID</label><input id="cModel" value="${esc(st.model || '')}" /></div>
       <div class="field"><label>API Key</label><input id="cKey" type="password" value="${esc(st.api_key || '')}" /></div>
       <div class="field"><label>Endpoint Token (optional)</label><input id="cTok" type="password" value="${esc(st.api_token || '')}" /></div>
@@ -1028,11 +2015,11 @@ async function openCustomizationsModal() {
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;" />
     <div style="font-weight:600;margin-bottom:8px;">Saved Profiles &amp; Auto-Fallback</div>
     <div style="display:flex;gap:8px;margin-bottom:10px;">
-      <input id="pName" placeholder="Profile name (e.g. LocalOrnith)" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:8px;" />
+      <input id="pName" placeholder="Profile name (e.g. LocalOrnith)" style="flex:1;padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;" />
       <button type="button" id="pSaveBtn" class="btn">Save Profile</button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:12px;">
-      <select id="pFbSel" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:8px;">
+      <select id="pFbSel" style="flex:1;padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;">
         <option value="">Auto-fallback: Disabled</option>
         ${profNames.map(n => `<option value="${esc(n)}" ${n===prof.fallback?'selected':''}>Fallback: ${esc(n)}</option>`).join('')}
       </select>
@@ -1040,8 +2027,8 @@ async function openCustomizationsModal() {
     </div>
     <div id="cProfilesList">${profilesListHtml}</div>`;
 
+  body.querySelectorAll('[data-ctab]').forEach(b => { b.onclick = () => openCustomizationsModal(b.dataset.ctab); });
   document.getElementById('cSwitchWsBtn').onclick = () => openWorkspaceModal();
-
   const getForm = () => ({
     provider: document.getElementById('cProv').value,
     mode: document.getElementById('cMode').value,
@@ -1054,7 +2041,6 @@ async function openCustomizationsModal() {
     sync_workspace: true,
   });
   const note = (txt) => { const el = document.getElementById('cStatus'); el.style.display = 'block'; el.textContent = txt; };
-
   document.getElementById('cTestBtn').onclick = async () => {
     note('Testing connection...');
     try {
@@ -1075,19 +2061,13 @@ async function openCustomizationsModal() {
     if (!name) { note('Enter a profile name first.'); return; }
     try {
       await apiPost('/api/profiles/save', { ...getForm(), name });
-      appState = await apiGet('/api/bootstrap');
-      renderAll();
-      await openCustomizationsModal();
-      showToast(`Saved profile "${name}"`);
+      appState = await apiGet('/api/bootstrap'); renderAll(); await openCustomizationsModal('provider'); showToast(`Saved profile "${name}"`);
     } catch (err) { note('Profile save error: ' + err.message); }
   };
   document.getElementById('pFbBtn').onclick = async () => {
     try {
       await apiPost('/api/profiles/fallback', { name: document.getElementById('pFbSel').value });
-      appState = await apiGet('/api/bootstrap');
-      renderAll();
-      await openCustomizationsModal();
-      showToast('Updated fallback profile');
+      appState = await apiGet('/api/bootstrap'); renderAll(); await openCustomizationsModal('provider'); showToast('Updated fallback profile');
     } catch (err) { note('Fallback error: ' + err.message); }
   };
   body.querySelectorAll('[data-use-prof]').forEach(btn => {
@@ -1095,10 +2075,7 @@ async function openCustomizationsModal() {
       const name = btn.dataset.useProf;
       try {
         await apiPost('/api/profiles/use', { name, workspace: appState.workspace });
-        appState = await apiGet('/api/bootstrap');
-        renderAll();
-        await openCustomizationsModal();
-        showToast(`Switched to profile "${name}"`);
+        appState = await apiGet('/api/bootstrap'); renderAll(); await openCustomizationsModal('provider'); showToast(`Switched to profile "${name}"`);
       } catch (err) { note('Switch error: ' + err.message); }
     };
   });
@@ -1107,16 +2084,14 @@ async function openCustomizationsModal() {
       const name = btn.dataset.delProf;
       try {
         await apiPost('/api/profiles/delete', { name });
-        appState = await apiGet('/api/bootstrap');
-        renderAll();
-        await openCustomizationsModal();
-        showToast(`Deleted profile "${name}"`);
+        appState = await apiGet('/api/bootstrap'); renderAll(); await openCustomizationsModal('provider'); showToast(`Deleted profile "${name}"`);
       } catch (err) { note('Delete error: ' + err.message); }
     };
   });
   modalBg.classList.add('open');
 }
 
+/* ---- Workspace Switcher Modal ---- */
 function openWorkspaceModal() {
   const modalBg = document.getElementById('modalBg');
   document.getElementById('modalTitle').textContent = 'Switch or Open Workspace';
@@ -1126,111 +2101,159 @@ function openWorkspaceModal() {
     <div style="margin-bottom:12px;">
       <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:500;">Folder path (supports ~ or full path)</label>
       <div style="display:flex;gap:8px;">
-        <input id="wsPathInput" value="${esc(appState?.workspace || '')}" placeholder="/Users/you/path/to/project" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-family:var(--mono);font-size:12.5px;" />
+        <input id="wsPathInput" value="${esc(appState?.workspace || '')}" placeholder="/Users/you/path/to/project" style="flex:1;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;padding:7px 10px;font-family:var(--mono);font-size:12.5px;" />
         <button type="button" id="wsOpenPathBtn" class="btn primary">Open</button>
         <button type="button" id="wsBrowseBtn" class="btn">Browse…</button>
       </div>
     </div>
     <div id="wsModalStatus" class="status-note" style="display:none;margin-bottom:12px;"></div>
     <div style="font-size:12px;font-weight:600;color:var(--muted);margin:14px 0 8px;">Recent Workspaces</div>
-    <div id="wsRecentList">
-      ${wsList.map(ws => `
-        <div class="profile-row">
-          <div style="min-width:0;">
-            <div style="font-weight:600;display:flex;align-items:center;gap:6px;">
-              <span>📁 ${esc(ws.name)}</span>
-              ${ws.active ? '<span class="badge">Active</span>' : ''}
-              ${ws.branch ? `<span style="font-size:11px;color:var(--muted);">${esc(ws.branch)}</span>` : ''}
-            </div>
-            <div style="font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(ws.path)}</div>
+    <div>${wsList.map(ws => `
+      <div class="profile-row">
+        <div style="min-width:0;">
+          <div style="font-weight:600;display:flex;align-items:center;gap:6px;">
+            <span>📁 ${esc(ws.name)}</span>
+            ${ws.active ? '<span class="badge">Active</span>' : ''}
+            ${ws.branch ? `<span style="font-size:11px;color:var(--muted);">${esc(ws.branch)}</span>` : ''}
           </div>
-          <div style="display:flex;gap:6px;flex-shrink:0;">
-            ${ws.active ? '' : `<button type="button" class="btn primary" data-modal-ws="${esc(ws.path)}">Switch</button>`}
-            ${wsList.length > 1 ? `<button type="button" class="btn" data-remove-ws="${esc(ws.path)}" title="Remove from list">✕</button>` : ''}
-          </div>
+          <div style="font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(ws.path)}</div>
         </div>
-      `).join('')}
-    </div>`;
-
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          ${ws.active ? '' : `<button type="button" class="btn sm primary" data-modal-ws="${esc(ws.path)}">Switch</button>`}
+          ${wsList.length > 1 ? `<button type="button" class="btn sm" data-remove-ws="${esc(ws.path)}">✕</button>` : ''}
+        </div>
+      </div>`).join('')}</div>`;
   const setWsNote = (txt, isErr = false) => {
     const el = document.getElementById('wsModalStatus');
-    el.style.display = 'block';
-    el.style.color = isErr ? 'var(--red)' : 'var(--text)';
-    el.textContent = txt;
+    el.style.display = 'block'; el.style.color = isErr ? 'var(--red)' : 'var(--text)'; el.textContent = txt;
   };
-
   const openPath = async () => {
     const target = document.getElementById('wsPathInput').value.trim();
     if (!target) { setWsNote('Enter a workspace folder path.', true); return; }
     try {
       appState = await apiPost('/api/workspace/select', { workspace: target });
-      modalBg.classList.remove('open');
-      renderAll();
-      showToast('Opened workspace: ' + appState.workspace_name);
-    } catch (err) {
-      setWsNote('Cannot open workspace: ' + err.message, true);
-    }
+      cachedWsFilesRoot = '';
+      modalBg.classList.remove('open'); renderAll(); showToast('Opened workspace: ' + appState.workspace_name);
+    } catch (err) { setWsNote('Cannot open workspace: ' + err.message, true); }
   };
-
   document.getElementById('wsOpenPathBtn').onclick = openPath;
   document.getElementById('wsPathInput').onkeydown = (e) => { if (e.key === 'Enter') openPath(); };
   document.getElementById('wsBrowseBtn').onclick = async () => {
     const btn = document.getElementById('wsBrowseBtn');
-    btn.disabled = true;
-    setWsNote('Opening folder picker...');
+    btn.disabled = true; setWsNote('Opening folder picker...');
     try {
       const r = await apiPost('/api/workspace/pick', {});
       if (r.ok && r.state) {
-        appState = r.state;
-        modalBg.classList.remove('open');
-        renderAll();
-        showToast('Opened workspace: ' + appState.workspace_name);
-      } else if (r.cancelled) {
-        setWsNote('Folder selection cancelled.');
-      } else {
-        setWsNote(r.error || 'Folder picker unavailable — type or paste a folder path above and click Open.', true);
-      }
-    } catch (err) {
-      setWsNote('Folder picker error: ' + err.message, true);
-    } finally {
-      btn.disabled = false;
-    }
+        appState = r.state; cachedWsFilesRoot = '';
+        modalBg.classList.remove('open'); renderAll(); showToast('Opened workspace: ' + appState.workspace_name);
+      } else if (r.cancelled) setWsNote('Folder selection cancelled.');
+      else setWsNote(r.error || 'Folder picker unavailable — type or paste a folder path above.', true);
+    } catch (err) { setWsNote('Folder picker error: ' + err.message, true); }
+    finally { btn.disabled = false; }
   };
   body.querySelectorAll('[data-modal-ws]').forEach(btn => {
     btn.onclick = async () => {
       try {
         appState = await apiPost('/api/workspace/select', { workspace: btn.dataset.modalWs });
-        modalBg.classList.remove('open');
-        renderAll();
-        showToast('Switched workspace to ' + appState.workspace_name);
-      } catch (err) {
-        setWsNote('Switch failed: ' + err.message, true);
-      }
+        cachedWsFilesRoot = ''; modalBg.classList.remove('open'); renderAll(); showToast('Switched workspace to ' + appState.workspace_name);
+      } catch (err) { setWsNote('Switch failed: ' + err.message, true); }
     };
   });
   body.querySelectorAll('[data-remove-ws]').forEach(btn => {
     btn.onclick = async () => {
-      try {
-        appState = await apiPost('/api/workspace/remove', { workspace: btn.dataset.removeWs });
-        renderAll();
-        openWorkspaceModal();
-      } catch (err) {
-        setWsNote('Remove failed: ' + err.message, true);
-      }
+      try { appState = await apiPost('/api/workspace/remove', { workspace: btn.dataset.removeWs }); renderAll(); openWorkspaceModal(); }
+      catch (err) { setWsNote('Remove failed: ' + err.message, true); }
     };
   });
   modalBg.classList.add('open');
   setTimeout(() => document.getElementById('wsPathInput')?.focus(), 40);
 }
 
+/* ---- Automations & Project Scaffolder Modal ---- */
+function openAutomationsModal(activeTab = 'workflows') {
+  const modalBg = document.getElementById('modalBg');
+  document.getElementById('modalTitle').textContent = 'Automations & Project Scaffolder';
+  const body = document.getElementById('modalBody');
+  const tabsHtml = `<div class="tab-bar">
+    <button type="button" class="tab-btn ${activeTab === 'workflows' ? 'active' : ''}" data-atab="workflows">Agent Workflows</button>
+    <button type="button" class="tab-btn ${activeTab === 'scaffold' ? 'active' : ''}" data-atab="scaffold">New Project Scaffolder</button>
+  </div>`;
+
+  if (activeTab === 'scaffold') {
+    const stacks = (appState && appState.stacks) || ['fastapi-service', 'java-spring', 'adk-python', 'adk-typescript', 'go-a2a'];
+    body.innerHTML = `${tabsHtml}
+      <div class="form-grid">
+        <div class="field"><label>Stack Template</label>
+          <select id="scTpl">${stacks.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Project Name</label><input id="scName" placeholder="e.g. billing-service" /></div>
+        <div class="field full"><label>Parent Directory (blank = inside current workspace)</label><input id="scParent" placeholder="${esc(appState?.workspace || '')}" /></div>
+        <div class="field full"><label>Optional Requirements (requirements.md)</label><textarea id="scReq" rows="4" placeholder="Describe endpoints, data models, or features to scaffold..."></textarea></div>
+      </div>
+      <div style="display:flex;gap:14px;margin:10px 0;font-size:12.5px;">
+        <label><input type="checkbox" id="scMin" /> Minimal skeleton</label>
+        <label><input type="checkbox" id="scOpen" checked /> Open new project as workspace</label>
+      </div>
+      <button type="button" id="scRunBtn" class="btn primary">Create Project</button>
+      <div id="scStatus" class="status-note" style="display:none;"></div>`;
+    body.querySelectorAll('[data-atab]').forEach(b => { b.onclick = () => openAutomationsModal(b.dataset.atab); });
+    document.getElementById('scRunBtn').onclick = async () => {
+      const name = document.getElementById('scName').value.trim();
+      const note = document.getElementById('scStatus');
+      if (!name) { note.style.display = 'block'; note.textContent = 'Enter a project name.'; return; }
+      note.style.display = 'block'; note.textContent = 'Scaffolding project...';
+      try {
+        const r = await apiPost('/api/tools/scaffold', {
+          workspace: appState.workspace,
+          template: document.getElementById('scTpl').value,
+          name,
+          parent_dir: document.getElementById('scParent').value.trim(),
+          requirements: document.getElementById('scReq').value.trim(),
+          minimal: document.getElementById('scMin').checked,
+          open_after: document.getElementById('scOpen').checked,
+        });
+        if (r.state) { appState = r.state; cachedWsFilesRoot = ''; modalBg.classList.remove('open'); renderAll(); showToast('Scaffolded & opened ' + name); }
+        else note.textContent = r.message || 'Created.';
+      } catch (err) { note.textContent = 'Error: ' + err.message; }
+    };
+    modalBg.classList.add('open');
+    return;
+  }
+
+  const actions = [
+    ['/debug', 'Multi-Sub-Agent Debugger', '4-stage pipeline: Log Analyst → Root Cause → Fix Engineer → Verifier'],
+    ['/analyze', 'Application Analysis', 'Generate docs/ANALYSIS.md with architecture, tech debt & findings'],
+    ['/pr-review', 'Branch / PR Reviewer', 'Review git diff for bugs, security, SOLID & test gaps'],
+    ['/testgen', 'Unit Test Generator', 'Generate passing unit & edge-case tests for a file'],
+    ['/security', 'Security & SOLID Scan', 'Offline SAST, secrets scanner, and SOLID complexity metrics'],
+    ['/diagram', 'Architecture & API Map', 'Deterministic Mermaid SVG dependency graph, cycles & HTTP routes'],
+    ['/resolve-conflicts', 'Merge Conflict Resolver', 'Cleanly merge Git conflict hunks and verify tests'],
+    ['/sbom', 'Generate SBOM', 'Export CycloneDX / SPDX Software Bill of Materials'],
+  ];
+  body.innerHTML = tabsHtml + actions.map(([cmd, title, desc]) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+      <div><strong>${esc(title)}</strong> <code>${esc(cmd)}</code><div style="font-size:12px;color:var(--muted);">${esc(desc)}</div></div>
+      <button class="btn sm primary" data-run-auto="${esc(cmd)}">Run</button>
+    </div>`).join('');
+  body.querySelectorAll('[data-atab]').forEach(b => { b.onclick = () => openAutomationsModal(b.dataset.atab); });
+  body.querySelectorAll('[data-run-auto]').forEach(b => {
+    b.onclick = () => {
+      modalBg.classList.remove('open');
+      const cmd = b.dataset.runAuto;
+      if (cmd === '/testgen') { const p = document.getElementById('promptInput'); p.value = '/testgen '; p.focus(); }
+      else sendMessage(cmd);
+    };
+  });
+  modalBg.classList.add('open');
+}
+
+/* ---- Attach File Modal ---- */
 async function openAttachFileModal() {
   const modalBg = document.getElementById('modalBg');
   document.getElementById('modalTitle').textContent = 'Attach @file Reference';
   const body = document.getElementById('modalBody');
-  const d = await apiGet('/api/files?workspace=' + encodeURIComponent(appState.workspace));
-  const allFiles = d.files || [];
-  body.innerHTML = `
-    <input id="attachSearch" placeholder="Filter workspace files..." style="width:100%;border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:10px;" />
+  const allFiles = await ensureWsFilesCached();
+  body.innerHTML = `<input id="attachSearch" placeholder="Filter workspace files..." style="width:100%;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;padding:7px 10px;margin-bottom:10px;" />
     <div id="attachList" style="max-height:360px;overflow-y:auto;"></div>`;
   const renderFiles = (q) => {
     const matched = allFiles.filter(f => !q || f.toLowerCase().includes(q.toLowerCase())).slice(0, 120);
@@ -1240,10 +2263,12 @@ async function openAttachFileModal() {
       : '<div style="font-size:12.5px;color:var(--muted);">No matching files.</div>';
     list.querySelectorAll('[data-attach]').forEach(row => {
       row.onclick = () => {
-        const inp = document.getElementById('promptInput');
-        inp.value = (inp.value ? inp.value + ' ' : '') + '@' + row.dataset.attach + ' ';
+        if (!attachedItems.some(a => a.path === row.dataset.attach)) {
+          attachedItems.push({ type: 'file', path: row.dataset.attach });
+          renderChipsAndQueue();
+        }
         modalBg.classList.remove('open');
-        inp.focus();
+        document.getElementById('promptInput').focus();
       };
     });
   };
@@ -1253,170 +2278,145 @@ async function openAttachFileModal() {
   setTimeout(() => document.getElementById('attachSearch')?.focus(), 40);
 }
 
-function openAutomationsModal() {
-  const modalBg = document.getElementById('modalBg');
-  document.getElementById('modalTitle').textContent = 'Automations & Agent Workflows';
-  const actions = [
-    ['/debug', 'Multi-Sub-Agent Debugger', 'Parse logs/failures -> Root Cause -> Surgical Fix -> Verify/Rollback'],
-    ['/analyze', 'Application Analysis', 'Generate docs/ANALYSIS.md with architecture, tech debt & findings'],
-    ['/pr-review', 'Branch / PR Reviewer', 'Review git diff for bugs, security, SOLID & test gaps'],
-    ['/testgen', 'Unit Test Generator', 'Generate passing unit & edge-case tests for a file'],
-    ['/security', 'Security & SOLID Scan', 'Offline SAST, secrets scanner, and SOLID complexity metrics'],
-    ['/diagram', 'Architecture & API Map', 'Deterministic Mermaid dependency graph, cycles & HTTP routes'],
-    ['/resolve-conflicts', 'Merge Conflict Resolver', 'Cleanly merge Git conflict hunks and verify tests'],
-    ['/sbom', 'Generate SBOM', 'Export CycloneDX / SPDX Software Bill of Materials'],
-  ];
-  document.getElementById('modalBody').innerHTML = actions.map(([cmd, title, desc]) => `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
-      <div><strong>${esc(title)}</strong> <code>${esc(cmd)}</code><div style="font-size:12px;color:var(--muted);">${esc(desc)}</div></div>
-      <button class="btn primary" data-run-auto="${esc(cmd)}">Run</button>
-    </div>`).join('');
-  document.querySelectorAll('[data-run-auto]').forEach(b => {
-    b.onclick = () => {
-      modalBg.classList.remove('open');
-      const cmd = b.dataset.runAuto;
-      if (cmd === '/testgen') {
-        const p = document.getElementById('promptInput');
-        p.value = '/testgen ';
-        p.focus();
-      } else {
-        sendMessage(cmd);
-      }
-    };
-  });
-  modalBg.classList.add('open');
-}
-
-// Wire controls
+/* ---- Wire Controls ---- */
 document.getElementById('toggleSidebarBtn').onclick = () => document.getElementById('mainBody').classList.toggle('sidebar-collapsed');
-document.getElementById('closeDrawerBtn').onclick = () => { drawerKind = null; document.getElementById('rightDrawer').classList.remove('open'); };
+document.getElementById('themeToggleBtn').onclick = () => {
+  const cur = localStorage.getItem('adk_coder_theme') || 'system';
+  applyTheme(THEME_MODES[(THEME_MODES.indexOf(cur) + 1) % THEME_MODES.length]);
+};
+document.getElementById('closeDrawerBtn').onclick = () => { stopTermPoller(); drawerKind = null; document.getElementById('rightDrawer').classList.remove('open'); };
 document.getElementById('closeModalBtn').onclick = () => document.getElementById('modalBg').classList.remove('open');
 document.getElementById('modalBg').onclick = (e) => { if (e.target.id === 'modalBg') e.target.classList.remove('open'); };
-document.getElementById('customizationsBtn').onclick = openCustomizationsModal;
-document.getElementById('automationsBtn').onclick = openAutomationsModal;
+document.getElementById('customizationsBtn').onclick = () => openCustomizationsModal('provider');
+document.getElementById('automationsBtn').onclick = () => openAutomationsModal('workflows');
+document.getElementById('ctxBtn').onclick = openContextModal;
 document.getElementById('openCodeBtn').onclick = () => apiPost('/api/tools/open-external', { workspace: appState.workspace, target: 'folder' });
 document.getElementById('runTestBtn').onclick = () => loadDrawer('terminal');
+document.getElementById('watchPill').onclick = () => loadDrawer('terminal');
 document.getElementById('refreshBtn').onclick = async () => { appState = await apiGet('/api/bootstrap'); renderAll(); };
 document.getElementById('newSessionBtn').onclick = async () => {
   const r = await apiPost('/api/session/new', { workspace: appState.workspace });
-  appState = r.state;
-  renderAll();
+  appState = r.state; renderAll();
 };
-
+document.getElementById('sessionSearchInput').oninput = (e) => {
+  sessionFilterQuery = e.target.value;
+  renderTopAndSidebar();
+};
 document.getElementById('addWsBtn').onclick = openWorkspaceModal;
 document.getElementById('wsPill').onclick = openWorkspaceModal;
-
 document.querySelectorAll('[data-open-drawer]').forEach(btn => {
   btn.onclick = () => {
     const k = btn.dataset.openDrawer;
-    if (drawerKind === k) { drawerKind = null; document.getElementById('rightDrawer').classList.remove('open'); }
+    if (drawerKind === k) { stopTermPoller(); drawerKind = null; document.getElementById('rightDrawer').classList.remove('open'); }
     else loadDrawer(k);
   };
 });
-
 document.getElementById('modeSelect').onchange = async (e) => {
   const r = await apiPost('/api/mode', { workspace: appState.workspace, mode: e.target.value });
-  appState = r.state;
-  renderAll();
+  appState = r.state; renderAll();
 };
-
 document.getElementById('profileSelect').onchange = async (e) => {
   if (!e.target.value) return;
   try {
     await apiPost('/api/profiles/use', { name: e.target.value, workspace: appState.workspace });
-    appState = await apiGet('/api/bootstrap');
-    renderAll();
-    showToast('Switched to profile: ' + e.target.value);
-  } catch (err) {
-    showToast('Profile switch failed: ' + err.message, true);
-  }
+    appState = await apiGet('/api/bootstrap'); renderAll(); showToast('Switched to profile: ' + e.target.value);
+  } catch (err) { showToast('Profile switch failed: ' + err.message, true); }
 };
-
 document.getElementById('attachFileBtn').onclick = openAttachFileModal;
-
+document.getElementById('queueBtn').onclick = () => sendMessage();
 document.getElementById('sendBtn').onclick = async () => {
   if (appState?.busy || liveTurn) {
     try {
       const r = await apiPost('/api/chat/abort', {});
       showToast('Stopping agent...');
-      if (r.state && !r.state.busy) {
-        await finishLiveTurnFromServer('');
-      } else {
-        startTurnPoller();
-      }
-    } catch (err) {
-      showToast('Stop failed: ' + err.message, true);
-    }
+      if (r.state && !r.state.busy) await finishLiveTurnFromServer('');
+      else startTurnPoller();
+    } catch (err) { showToast('Stop failed: ' + err.message, true); }
   } else {
     sendMessage();
   }
 };
 
-document.getElementById('promptInput').addEventListener('keydown', (e) => {
+const promptEl = document.getElementById('promptInput');
+promptEl.addEventListener('input', updateAutocomplete);
+promptEl.addEventListener('keydown', (e) => {
+  if (acMode && acItems.length) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); acIndex = (acIndex + 1) % acItems.length; renderAcMenu(); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); acIndex = (acIndex - 1 + acItems.length) % acItems.length; renderAcMenu(); return; }
+    if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); applyAcItem(acIndex); return; }
+    if (e.key === 'Escape') { e.preventDefault(); closeAutocomplete(); return; }
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    if (!appState?.busy && !liveTurn) sendMessage();
+    sendMessage();
   }
 });
-
+promptEl.addEventListener('paste', (e) => {
+  const items = e.clipboardData?.items || [];
+  for (const it of items) {
+    if (it.type && it.type.startsWith('image/')) {
+      e.preventDefault();
+      uploadImageFile(it.getAsFile());
+      return;
+    }
+  }
+});
+const cBox = document.getElementById('composerBox');
+cBox.addEventListener('dragover', (e) => { e.preventDefault(); cBox.classList.add('drag-over'); });
+cBox.addEventListener('dragleave', () => cBox.classList.remove('drag-over'));
+cBox.addEventListener('drop', (e) => {
+  e.preventDefault(); cBox.classList.remove('drag-over');
+  for (const f of (e.dataTransfer?.files || [])) {
+    if (f.type.startsWith('image/')) uploadImageFile(f);
+  }
+});
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
-    e.preventDefault();
-    document.getElementById('newSessionBtn').click();
+    e.preventDefault(); document.getElementById('newSessionBtn').click();
   }
 });
 
-// Live SSE Event Stream
+/* ---- Live SSE Event Stream ---- */
 let activeEventSource = null;
 let reconnectTimer = null;
-
 function connectEvents() {
-  if (activeEventSource) {
-    try { activeEventSource.close(); } catch (_) {}
-  }
+  if (activeEventSource) { try { activeEventSource.close(); } catch (_) {} }
   const es = new EventSource('/api/events');
   activeEventSource = es;
   es.onopen = async () => {
-    // If we reconnected after a brief drop while waiting for a turn, resync state
     if (liveTurn || appState?.busy) {
       try {
         const fresh = await apiGet('/api/bootstrap');
-        if (!fresh.busy) {
-          liveTurn = null;
-          pendingApproval = null;
-          appState = fresh;
-          renderAll();
-        }
+        if (!fresh.busy) { stopTurnPoller(); liveTurn = null; pendingApproval = null; appState = fresh; renderAll(); }
       } catch (_) {}
     }
   };
   es.onmessage = (msg) => {
     try {
       const ev = JSON.parse(msg.data);
-      if (ev.type === 'thought' && liveTurn) {
-        liveTurn.thought += ev.text;
-        renderChat();
+      if (ev.type === 'turn_start' && !liveTurn) {
+        liveTurn = { turnId: ev.turn_id || 0, userMessage: ev.message || '', startedTime: nowTime(), steps: [], thought: '', text: '', debugPipeline: null };
+        startTurnPoller();
+        renderAll();
+      } else if (ev.type === 'thought' && liveTurn) {
+        liveTurn.thought += ev.text; renderChat();
       } else if (ev.type === 'text' && liveTurn) {
-        liveTurn.text += ev.text;
-        renderChat();
+        liveTurn.text += ev.text; renderChat();
       } else if (ev.type === 'tool_call' && liveTurn) {
         if (ev.step) upsertLiveStep(ev.step);
-        else liveTurn.steps.push({ id: liveTurn.steps.length + 1, name: ev.name, args: ev.args, status: 'running' });
         renderChat();
       } else if (ev.type === 'tool_result' && liveTurn) {
         if (ev.step) upsertLiveStep(ev.step);
         renderChat();
       } else if (ev.type === 'approval_request') {
-        pendingApproval = { id: ev.id, message: ev.message };
-        renderChat();
+        pendingApproval = { id: ev.id, message: ev.message }; renderChat();
+      } else if (ev.type === 'watch_update') {
+        if (appState) appState.watch = ev.watch;
+        renderWatchPill(ev.watch);
+        if (drawerKind === 'terminal') loadDrawer('terminal');
       } else if (ev.type === 'turn_done' || ev.type === 'turn_error') {
-        stopTurnPoller();
-        liveTurn = null;
-        pendingApproval = null;
-        if (ev.state) {
-          appState = ev.state;
-          appState.busy = false;
-        }
+        stopTurnPoller(); liveTurn = null; pendingApproval = null;
+        if (ev.state) { appState = ev.state; appState.busy = false; }
         if (ev.type === 'turn_error') showToast('Agent error: ' + ev.error, true);
         renderAll();
       }

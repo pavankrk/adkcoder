@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -20,7 +22,7 @@ from contextlib import suppress
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -36,7 +38,13 @@ from .config_ui import (
     dispatch_request as dispatch_config_request,
 )
 from .diagram import analyze_structure, render_diagram_markdown
-from .harness import AgentHarness
+from .extensions import (
+    HOOK_EVENTS,
+    create_custom_command,
+    list_custom_commands,
+    list_skills,
+)
+from .harness import COMMANDS, AgentHarness
 from .profiles import apply_profile_to_env, load_profiles, masked_profiles_summary
 from .sbom import build_cyclonedx, build_spdx, discover_components
 from .scaffolder import STACKS, scaffold
@@ -45,6 +53,7 @@ from .security import security_scan
 from .token_manager import capacity, estimate
 from .tools import IGNORED_DIRS, MODES, _is_protected_part, atomic_write
 from .ui import StreamDisplay, console
+from .watcher import diff_snapshots, snapshot_workspace
 
 
 def _workspaces_registry_path(env_path: Path | None = None) -> Path:
@@ -195,6 +204,100 @@ def _build_step_entry(step_id: int, name: str, args: dict[str, Any] | None) -> d
     return entry
 
 
+def _auto_title_from_prompt(prompt: str) -> str:
+    cleaned = " ".join((prompt or "").split()).strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) <= 44:
+        return cleaned
+    return cleaned[:41].rstrip() + "..."
+
+
+def _parse_git_file_diffs(root: Path, status_txt: str, diff_txt: str) -> list[dict[str, Any]]:
+    """Split unified git diff and status into per-file records for interactive review & revert."""
+    file_diffs: dict[str, str] = {}
+    current_path = ""
+    buf: list[str] = []
+    for line in diff_txt.splitlines():
+        if line.startswith("diff --git "):
+            if current_path and buf:
+                file_diffs[current_path] = "\n".join(buf)
+            parts = line.split(" b/", 1)
+            current_path = parts[1].strip() if len(parts) == 2 else ""
+            buf = [line]
+        elif current_path:
+            buf.append(line)
+    if current_path and buf:
+        file_diffs[current_path] = "\n".join(buf)
+
+    status_map: dict[str, str] = {}
+    for raw in status_txt.splitlines():
+        if len(raw) < 4:
+            continue
+        code = raw[:2].strip() or "M"
+        rel = raw[3:].strip()
+        if " -> " in rel:
+            rel = rel.split(" -> ", 1)[1].strip()
+        rel = rel.strip('"')
+        if rel:
+            status_map[rel] = code
+
+    all_paths = sorted(set(file_diffs.keys()) | set(status_map.keys()))
+    results: list[dict[str, Any]] = []
+    for rel in all_paths[:80]:
+        fdiff = file_diffs.get(rel, "")
+        added = sum(1 for ln in fdiff.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
+        deleted = sum(1 for ln in fdiff.splitlines() if ln.startswith("-") and not ln.startswith("---"))
+        st = status_map.get(rel, "M")
+        if st == "??" and not fdiff:
+            target = root / rel
+            if target.is_file():
+                try:
+                    preview_lines = target.read_text(encoding="utf8", errors="replace").splitlines()[:120]
+                    added = len(preview_lines)
+                    fdiff = "\n".join(f"+{ln}" for ln in preview_lines)
+                except OSError:
+                    pass
+        results.append(
+            {
+                "path": rel,
+                "status": st,
+                "added": added,
+                "deleted": deleted,
+                "diff": scrub(fdiff)[:20000],
+            }
+        )
+    return results
+
+
+def _list_checkpoints(h: AgentHarness) -> dict[str, Any]:
+    snaps: list[dict[str, Any]] = []
+    chk_dir = h.checkpoints.directory
+    if chk_dir.is_dir():
+        for entry in sorted(chk_dir.iterdir(), reverse=True):
+            manifest = entry / "manifest.json"
+            if not entry.is_dir() or not manifest.is_file():
+                continue
+            try:
+                meta = json.loads(manifest.read_text(encoding="utf8"))
+                snaps.append(
+                    {
+                        "id": entry.name,
+                        "label": str(meta.get("label") or entry.name),
+                        "branch": str(meta.get("branch") or ""),
+                        "model": str(meta.get("model") or ""),
+                        "commit": str(meta.get("commit") or "")[:8],
+                    }
+                )
+            except (OSError, json.JSONDecodeError):
+                continue
+    return {
+        "edits_count": h.tools.edit_history_count(),
+        "is_git_repo": h.git.is_repo(),
+        "checkpoints": snaps[:30],
+    }
+
+
 def load_desktop_html() -> str:
     override = os.environ.get("ADK_CODER_DESKTOP_HTML", "").strip()
     if override and Path(override).is_file():
@@ -255,6 +358,7 @@ class DesktopController:
         self._abort_requested = False
         self._turn_seq = 0
         self._done_turn_id = 0
+        self._queue: list[dict[str, str]] = []
         self._turn_snapshot: dict[str, Any] = {
             "turn_id": 0,
             "done_turn_id": 0,
@@ -264,11 +368,32 @@ class DesktopController:
             "steps": [],
             "error": "",
             "pending_approval": None,
+            "debug_pipeline": None,
         }
         self._active_abort: asyncio.Event | None = None
         self._active_loop: asyncio.AbstractEventLoop | None = None
         self._active_task: asyncio.Task[Any] | None = None
         self._pending_approvals: dict[str, tuple[threading.Event, dict[str, Any]]] = {}
+        self._term_proc: subprocess.Popen[str] | None = None
+        self._term_state: dict[str, Any] = {
+            "running": False,
+            "command": "",
+            "workspace": "",
+            "output": "",
+            "exit_code": None,
+        }
+        self._watch_stop = threading.Event()
+        self._watch_thread: threading.Thread | None = None
+        self._watch_state: dict[str, Any] = {
+            "running": False,
+            "command": "",
+            "workspace": "",
+            "interval": 1.5,
+            "last_status": "idle",
+            "last_output": "",
+            "changed_files": [],
+            "run_count": 0,
+        }
         self._window: Any = None  # pywebview Window reference when running natively
 
     def attach_window(self, window: Any) -> None:
@@ -367,7 +492,203 @@ class DesktopController:
                 "steps": list(self._turn_snapshot.get("steps") or []),
                 "error": self._turn_snapshot.get("error", ""),
                 "pending_approval": self._turn_snapshot.get("pending_approval"),
+                "debug_pipeline": self._turn_snapshot.get("debug_pipeline"),
+                "queued_messages": list(self._queue),
             }
+
+    def queue_message(self, message: str, workspace: str | None = None) -> dict[str, Any]:
+        cleaned = (message or "").strip()
+        if not cleaned:
+            raise ValueError("Queued message cannot be empty.")
+        with self._lock:
+            if not self._busy:
+                should_start_now = True
+            else:
+                should_start_now = False
+                self._queue.append(
+                    {
+                        "id": uuid.uuid4().hex[:8],
+                        "message": cleaned,
+                        "workspace": workspace or self._active_ws,
+                    }
+                )
+        if should_start_now:
+            return self.start_chat_turn(cleaned, workspace)
+        return {"ok": True, "queued": True, "queued_messages": list(self._queue)}
+
+    def remove_queued_message(self, index: int) -> dict[str, Any]:
+        with self._lock:
+            if 0 <= index < len(self._queue):
+                self._queue.pop(index)
+            q_copy = list(self._queue)
+        return {"ok": True, "queued_messages": q_copy}
+
+    def clear_queue(self) -> dict[str, Any]:
+        with self._lock:
+            self._queue.clear()
+        return {"ok": True, "queued_messages": []}
+
+    def upload_image(self, data_url: str, filename: str = "paste.png", workspace: str | None = None) -> dict[str, Any]:
+        h = self.get_harness(workspace)
+        raw_url = (data_url or "").strip()
+        match = re.match(r"^data:image/(png|jpeg|jpg|webp|gif);base64,(.+)$", raw_url, re.IGNORECASE | re.DOTALL)
+        if not match:
+            raise ValueError("Unsupported image format. Paste PNG, JPEG, WebP, or GIF.")
+        ext = match.group(1).lower().replace("jpeg", "jpg")
+        b64 = match.group(2).strip()
+        try:
+            raw_bytes = base64.b64decode(b64, validate=True)
+        except Exception as exc:
+            raise ValueError("Invalid base64 image payload.") from exc
+        if len(raw_bytes) > 6 * 1024 * 1024:
+            raise ValueError("Image exceeds 6 MB limit.")
+        uploads_dir = h.state / "uploads"
+        uploads_dir.mkdir(mode=0o700, exist_ok=True)
+        safe_stem = re.sub(r"[^A-Za-z0-9_-]", "_", Path(filename or "paste").stem)[:24] or "paste"
+        dest = uploads_dir / f"{safe_stem}_{uuid.uuid4().hex[:6]}.{ext}"
+        dest.write_bytes(raw_bytes)
+        rel = dest.relative_to(h.root).as_posix()
+        return {"ok": True, "path": rel, "bytes": len(raw_bytes)}
+
+    # --- Streaming Embedded Terminal ---
+    def terminal_status(self) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._term_state)
+
+    def stop_terminal(self) -> dict[str, Any]:
+        with self._lock:
+            proc = self._term_proc
+        if proc is not None and proc.poll() is None:
+            with suppress(OSError):
+                proc.terminate()
+        return {"ok": True, "terminal": self.terminal_status()}
+
+    def start_terminal(self, command: str, workspace: str | None = None) -> dict[str, Any]:
+        cmd = (command or "").strip()
+        if not cmd:
+            raise ValueError("Command cannot be empty.")
+        h = self.get_harness(workspace)
+        self.stop_terminal()
+        exec_args = ["cmd", "/c", cmd] if sys.platform == "win32" else ["/bin/sh", "-c", cmd]
+        proc = subprocess.Popen(
+            exec_args,
+            cwd=h.root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            bufsize=1,
+        )
+        with self._lock:
+            self._term_proc = proc
+            self._term_state = {
+                "running": True,
+                "command": cmd,
+                "workspace": str(h.root),
+                "output": "",
+                "exit_code": None,
+            }
+
+        def _reader() -> None:
+            chunks: list[str] = []
+            try:
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    clean = scrub(line)
+                    chunks.append(clean)
+                    joined = "".join(chunks)[-32000:]
+                    with self._lock:
+                        self._term_state["output"] = joined
+                    self.emit({"type": "terminal_chunk", "chunk": clean})
+            except OSError:
+                pass
+            finally:
+                rc = proc.wait()
+                with self._lock:
+                    self._term_state["running"] = False
+                    self._term_state["exit_code"] = rc
+                    if self._term_proc is proc:
+                        self._term_proc = None
+                self.emit({"type": "terminal_done", "exit_code": rc})
+
+        threading.Thread(target=_reader, daemon=True).start()
+        return {"ok": True, "terminal": self.terminal_status()}
+
+    # --- Real-Time Watch Mode ---
+    def watch_status(self) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._watch_state)
+
+    def stop_watch(self) -> dict[str, Any]:
+        self._watch_stop.set()
+        with self._lock:
+            self._watch_state["running"] = False
+        self.emit({"type": "watch_update", "watch": self.watch_status()})
+        return {"ok": True, "watch": self.watch_status()}
+
+    def start_watch(
+        self, command: str | None = None, workspace: str | None = None, interval: float = 1.5
+    ) -> dict[str, Any]:
+        h = self.get_harness(workspace)
+        cmd = (command or "").strip() or (h.test_command() or "").strip()
+        if not cmd:
+            raise ValueError("Set a test command first (e.g. pytest -q or mvn -B test).")
+        self.stop_watch()
+        self._watch_stop = threading.Event()
+        iv = max(0.4, min(float(interval or 1.5), 30.0))
+        with self._lock:
+            self._watch_state = {
+                "running": True,
+                "command": cmd,
+                "workspace": str(h.root),
+                "interval": iv,
+                "last_status": "watching",
+                "last_output": "",
+                "changed_files": [],
+                "run_count": 0,
+            }
+        self.emit({"type": "watch_update", "watch": self.watch_status()})
+
+        def _watch_loop() -> None:
+            snap = snapshot_workspace(h.root)
+            exec_args = ["cmd", "/c", cmd] if sys.platform == "win32" else ["/bin/sh", "-c", cmd]
+            while not self._watch_stop.is_set():
+                sleep(iv)
+                if self._watch_stop.is_set():
+                    break
+                latest = snapshot_workspace(h.root)
+                changed = diff_snapshots(snap, latest)
+                if not changed:
+                    continue
+                with self._lock:
+                    self._watch_state["last_status"] = "running"
+                    self._watch_state["changed_files"] = changed[:10]
+                self.emit({"type": "watch_update", "watch": self.watch_status()})
+                try:
+                    proc = subprocess.run(
+                        exec_args,
+                        cwd=h.root,
+                        capture_output=True,
+                        text=True,
+                        errors="replace",
+                        timeout=180,
+                        check=False,
+                    )
+                    passed = proc.returncode == 0
+                    out = scrub((proc.stdout + proc.stderr)[-12000:])
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    passed = False
+                    out = scrub(str(exc))
+                with self._lock:
+                    self._watch_state["last_status"] = "pass" if passed else "fail"
+                    self._watch_state["last_output"] = out
+                    self._watch_state["run_count"] = int(self._watch_state.get("run_count", 0)) + 1
+                self.emit({"type": "watch_update", "watch": self.watch_status()})
+                snap = snapshot_workspace(h.root)
+
+        self._watch_thread = threading.Thread(target=_watch_loop, daemon=True)
+        self._watch_thread.start()
+        return {"ok": True, "watch": self.watch_status()}
 
     def _clean_workspace_path(self, workspace: str | None) -> str:
         raw = (workspace or self._active_ws or "").strip()
@@ -596,6 +917,12 @@ class DesktopController:
         branch, dirty = h.git_info()
         added, deleted = _git_numstat(h.root)
 
+        custom_cmds = sorted(list_custom_commands(h.state).keys())
+        all_commands = [
+            {"name": f"/{name}", "args": usage, "custom": False}
+            for name, usage in sorted(COMMANDS.items())
+        ] + [{"name": f"/{c}", "args": "[arguments]", "custom": True} for c in custom_cmds]
+
         return {
             "version": __version__,
             "busy": self._busy,
@@ -614,6 +941,10 @@ class DesktopController:
                 "limit": limit_tok,
                 "percent": pct,
                 "label": "Low" if pct < 40 else ("Medium" if pct < 75 else "High"),
+                "prompt_tokens": h.tracker.prompt_tokens,
+                "output_tokens": h.tracker.output_tokens,
+                "total_tokens": h.tracker.total_tokens,
+                "calls": h.tracker.turns,
             },
             "active_session_id": h.active_session_id,
             "history": h._load_history(),
@@ -622,6 +953,10 @@ class DesktopController:
             "workspaces": ws_entries,
             "profiles": masked_profiles_summary(self.env_path),
             "stacks": sorted(STACKS.keys()),
+            "commands": all_commands,
+            "queued_messages": list(self._queue),
+            "watch": self.watch_status(),
+            "debug_report_exists": (h.root / "docs" / "DEBUG_REPORT.md").is_file(),
         }
 
     def start_chat_turn(self, message: str, workspace: str | None = None) -> dict[str, Any]:
@@ -637,6 +972,7 @@ class DesktopController:
             self._active_ws = str(h.root)
             self._turn_seq += 1
             turn_id = self._turn_seq
+            is_debug_cmd = cleaned.lower().startswith("/debug")
             self._turn_snapshot = {
                 "turn_id": turn_id,
                 "done_turn_id": self._done_turn_id,
@@ -646,7 +982,29 @@ class DesktopController:
                 "steps": [],
                 "error": "",
                 "pending_approval": None,
+                "debug_pipeline": (
+                    {
+                        "active": True,
+                        "stage": 0,
+                        "stages": ["Log Analyst", "Root Cause", "Fix Engineer", "Verifier"],
+                        "report_exists": (h.root / "docs" / "DEBUG_REPORT.md").is_file(),
+                    }
+                    if is_debug_cmd
+                    else None
+                ),
             }
+
+        # Auto-title default / auto-named sessions from the first user prompt
+        try:
+            cur_sess = h.sessions.get(h.active_session_id)
+            if cur_sess and (
+                cur_sess["name"] == "default" or cur_sess["name"].startswith("session-")
+            ):
+                auto_name = _auto_title_from_prompt(cleaned)
+                if auto_name:
+                    h.sessions.rename(cur_sess["id"], auto_name)
+        except (OSError, ValueError):
+            pass
 
         worker = threading.Thread(
             target=self._run_turn_worker,
@@ -772,6 +1130,14 @@ class DesktopController:
                 steps.append(entry)
             with self._lock:
                 self._turn_snapshot["steps"] = [dict(s) for s in steps]
+                dp = self._turn_snapshot.get("debug_pipeline")
+                if isinstance(dp, dict):
+                    if name in {"read_file", "search_files", "find_files", "list_dir"}:
+                        dp["stage"] = max(int(dp.get("stage", 0)), 1)
+                    elif name in {"write_file", "apply_diff", "apply_multi_diff"}:
+                        dp["stage"] = max(int(dp.get("stage", 0)), 2)
+                    elif name == "run_shell_command" and int(dp.get("stage", 0)) >= 2:
+                        dp["stage"] = 3
             self.emit({"type": "tool_call", "turn_id": turn_id, "step": entry})
 
         def _tap_tool_res(name: str, preview: str = "") -> None:
@@ -919,6 +1285,12 @@ class DesktopController:
                 self._active_loop = None
                 self._active_abort = None
                 self._active_task = None
+                dp = self._turn_snapshot.get("debug_pipeline")
+                if isinstance(dp, dict):
+                    dp["active"] = False
+                    if turn_status == "done":
+                        dp["stage"] = 4
+                    dp["report_exists"] = (h.root / "docs" / "DEBUG_REPORT.md").is_file()
                 self._turn_snapshot.update(
                     {
                         "turn_id": turn_id,
@@ -929,11 +1301,16 @@ class DesktopController:
                         "pending_approval": None,
                     }
                 )
+                next_queued = self._queue.pop(0) if (turn_status == "done" and self._queue) else None
             loop.close()
 
         if outcome_event is not None:
             outcome_event["state"] = self.bootstrap_state()
             self.emit(outcome_event)
+
+        if next_queued is not None:
+            with suppress(Exception):
+                self.start_chat_turn(next_queued["message"], next_queued.get("workspace"))
 
 
 def dispatch_desktop_request(
@@ -977,6 +1354,45 @@ def dispatch_desktop_request(
                 return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(ctrl.bootstrap_state()).encode("utf8")
             if path == "/api/chat/status":
                 return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(ctrl.chat_status()).encode("utf8")
+            if path == "/api/sessions/search":
+                h = ctrl.get_harness(ws_param or None)
+                q = (qs.get("q") or [""])[0]
+                hits = [
+                    {
+                        "id": s["id"],
+                        "name": s["name"],
+                        "model": s.get("model", ""),
+                        "updated_at": s.get("updated_at", ""),
+                    }
+                    for s in h.sessions.search(q)[:25]
+                ]
+                return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps({"sessions": hits}).encode("utf8")
+            if path == "/api/terminal/status":
+                return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(ctrl.terminal_status()).encode("utf8")
+            if path == "/api/watch/status":
+                return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(ctrl.watch_status()).encode("utf8")
+            if path == "/api/checkpoints":
+                h = ctrl.get_harness(ws_param or None)
+                return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(_list_checkpoints(h)).encode("utf8")
+            if path == "/api/extensions":
+                h = ctrl.get_harness(ws_param or None)
+                skills = [
+                    {"name": v["name"], "description": v["description"], "path": v["path"]}
+                    for v in list_skills(h.state).values()
+                ]
+                cmds = [
+                    {"name": k, "path": str(p), "body": scrub(p.read_text(encoding="utf8", errors="replace"))[:2000]}
+                    for k, p in list_custom_commands(h.state).items()
+                ]
+                return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(
+                    {
+                        "skills": skills,
+                        "commands": cmds,
+                        "hooks": h.hooks.load(),
+                        "hook_events": list(HOOK_EVENTS),
+                        "mcp_servers": h.mcp.load(),
+                    }
+                ).encode("utf8")
             if path == "/api/files":
                 h = ctrl.get_harness(ws_param or None)
                 return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps({"files": _iter_tree(h.root)}).encode("utf8")
@@ -1000,6 +1416,7 @@ def dispatch_desktop_request(
                         "status": scrub(status_txt),
                         "added": added,
                         "deleted": deleted,
+                        "files": _parse_git_file_diffs(h.root, status_txt, diff_txt),
                     }
                 ).encode("utf8")
         except Exception as exc:  # noqa: BLE001
@@ -1023,6 +1440,19 @@ def dispatch_desktop_request(
                 h = ctrl.get_harness(ws_param or None)
                 h.resume_session(str(payload.get("session_id") or ""))
                 data = {"ok": True, "state": ctrl.bootstrap_state()}
+            elif path == "/api/session/rename":
+                h = ctrl.get_harness(ws_param or None)
+                sid = str(payload.get("session_id") or h.active_session_id)
+                new_name = str(payload.get("name") or "").strip()
+                h.sessions.rename(sid, new_name)
+                data = {"ok": True, "state": ctrl.bootstrap_state()}
+            elif path == "/api/session/fork":
+                h = ctrl.get_harness(ws_param or None)
+                sid = str(payload.get("session_id") or h.active_session_id)
+                new_name = str(payload.get("name") or "").strip()
+                forked = h.sessions.fork(sid, new_name)
+                h.resume_session(forked["id"])
+                data = {"ok": True, "session": forked, "state": ctrl.bootstrap_state()}
             elif path == "/api/session/delete":
                 h = ctrl.get_harness(ws_param or None)
                 h._session_command(["delete", str(payload.get("session_id") or "")])
@@ -1033,6 +1463,18 @@ def dispatch_desktop_request(
                 data = {"ok": True, "state": ctrl.bootstrap_state()}
             elif path == "/api/chat/send":
                 data = ctrl.start_chat_turn(str(payload.get("message") or ""), ws_param or None)
+            elif path == "/api/chat/queue":
+                data = ctrl.queue_message(str(payload.get("message") or ""), ws_param or None)
+            elif path == "/api/chat/queue/remove":
+                data = ctrl.remove_queued_message(int(payload.get("index", -1)))
+            elif path == "/api/chat/queue/clear":
+                data = ctrl.clear_queue()
+            elif path == "/api/chat/upload-image":
+                data = ctrl.upload_image(
+                    str(payload.get("data_url") or ""),
+                    str(payload.get("filename") or "paste.png"),
+                    ws_param or None,
+                )
             elif path == "/api/chat/abort":
                 data = ctrl.abort_active_turn()
             elif path == "/api/chat/approve":
@@ -1045,6 +1487,107 @@ def dispatch_desktop_request(
                 count = max(1, int(payload.get("count") or 1))
                 msg = h.tools.undo_last_edit(count)
                 data = {"ok": True, "message": msg, "state": ctrl.bootstrap_state()}
+            elif path == "/api/checkpoints/create":
+                h = ctrl.get_harness(ws_param or None)
+                label = str(payload.get("label") or "").strip() or "desktop-checkpoint"
+                cid = h.checkpoints.create(label, h.model, h.tracker.total_tokens)
+                data = {"ok": True, "id": cid, "checkpoints": _list_checkpoints(h)}
+            elif path == "/api/checkpoints/restore":
+                h = ctrl.get_harness(ws_param or None)
+                cid = str(payload.get("id") or "").strip()
+                msg = h.checkpoints.restore(cid, lambda _: True)
+                data = {"ok": True, "message": msg, "state": ctrl.bootstrap_state()}
+            elif path == "/api/checkpoints/delete":
+                h = ctrl.get_harness(ws_param or None)
+                cid = str(payload.get("id") or "").strip()
+                msg = h.checkpoints.delete(cid, lambda _: True)
+                data = {"ok": True, "message": msg, "checkpoints": _list_checkpoints(h)}
+            elif path == "/api/git/revert-file":
+                h = ctrl.get_harness(ws_param or None)
+                rel = str(payload.get("path") or "").strip()
+                if not rel:
+                    raise ValueError("File path is required.")
+                target = h.tools.path(rel)
+                try:
+                    h.git.run("checkout", "--", rel)
+                except ValueError:
+                    if target.is_file():
+                        target.unlink()
+                    else:
+                        raise
+                data = {"ok": True, "state": ctrl.bootstrap_state()}
+            elif path == "/api/git/commit":
+                h = ctrl.get_harness(ws_param or None)
+                msg = str(payload.get("message") or "").strip()
+                if not msg:
+                    data = ctrl.start_chat_turn("/commit", ws_param or None)
+                else:
+                    h.git.run("add", "-A", "--", ".", ":(exclude).agent")
+                    out = h.git.run("commit", "-m", msg)
+                    data = {"ok": True, "output": scrub(out), "state": ctrl.bootstrap_state()}
+            elif path == "/api/context/pin":
+                h = ctrl.get_harness(ws_param or None)
+                rel = str(payload.get("path") or "").strip()
+                target = h.tools.path(rel)
+                if not target.is_file():
+                    raise ValueError(f"File not found: {rel}")
+                norm = target.relative_to(h.root).as_posix()
+                pinned = h._load_pinned()
+                if norm not in pinned:
+                    pinned.append(norm)
+                    h._save_pinned(pinned)
+                data = {"ok": True, "state": ctrl.bootstrap_state()}
+            elif path == "/api/context/unpin":
+                h = ctrl.get_harness(ws_param or None)
+                rel = str(payload.get("path") or "").strip()
+                pinned = [p for p in h._load_pinned() if p != rel] if rel != "all" else []
+                h._save_pinned(pinned)
+                data = {"ok": True, "state": ctrl.bootstrap_state()}
+            elif path == "/api/context/compact":
+                data = ctrl.start_chat_turn("/compact", ws_param or None)
+            elif path == "/api/extensions/command":
+                h = ctrl.get_harness(ws_param or None)
+                dest = create_custom_command(
+                    h.state,
+                    str(payload.get("name") or ""),
+                    str(payload.get("body") or ""),
+                )
+                data = {"ok": True, "path": str(dest), "state": ctrl.bootstrap_state()}
+            elif path == "/api/extensions/hooks":
+                h = ctrl.get_harness(ws_param or None)
+                raw_hooks = payload.get("hooks") if isinstance(payload.get("hooks"), dict) else {}
+                clean_hooks = {
+                    ev: [str(c).strip() for c in (raw_hooks.get(ev) or []) if str(c).strip()]
+                    for ev in HOOK_EVENTS
+                }
+                atomic_write(h.hooks.config_path, json.dumps(clean_hooks, indent=2) + "\n", mode=0o600)
+                data = {"ok": True, "hooks": clean_hooks}
+            elif path == "/api/extensions/mcp/add":
+                h = ctrl.get_harness(ws_param or None)
+                raw_args = payload.get("args")
+                args_list = (
+                    [str(a) for a in raw_args if str(a).strip()]
+                    if isinstance(raw_args, list)
+                    else str(raw_args or "").split()
+                )
+                entry = h.mcp.add(str(payload.get("name") or ""), str(payload.get("command") or ""), args_list)
+                data = {"ok": True, "server": entry}
+            elif path == "/api/extensions/mcp/remove":
+                h = ctrl.get_harness(ws_param or None)
+                removed = h.mcp.remove(str(payload.get("name") or ""))
+                data = {"ok": removed}
+            elif path == "/api/terminal/start":
+                data = ctrl.start_terminal(str(payload.get("command") or ""), ws_param or None)
+            elif path == "/api/terminal/stop":
+                data = ctrl.stop_terminal()
+            elif path == "/api/watch/start":
+                data = ctrl.start_watch(
+                    str(payload.get("command") or ""),
+                    ws_param or None,
+                    float(payload.get("interval") or 1.5),
+                )
+            elif path == "/api/watch/stop":
+                data = ctrl.stop_watch()
             elif path == "/api/terminal/run":
                 h = ctrl.get_harness(ws_param or None)
                 cmd = str(payload.get("command") or "").strip()
@@ -1088,16 +1631,47 @@ def dispatch_desktop_request(
                 h = ctrl.get_harness(ws_param or None)
                 name = str(payload.get("name") or "").strip()
                 tpl = str(payload.get("template") or "fastapi-service").strip()
+                parent_dir = str(payload.get("parent_dir") or "").strip()
+                reqs_text = str(payload.get("requirements") or "").strip()
+
+                target_h = h
                 cli_args = [tpl, name]
+                if parent_dir:
+                    p_expanded = Path(parent_dir).expanduser()
+                    if p_expanded.is_absolute():
+                        p_resolved = p_expanded.resolve()
+                        if not p_resolved.is_dir():
+                            raise ValueError(f"Parent directory not found: {p_resolved}")
+                        target_h = AgentHarness(p_resolved, approve=lambda _: True)
+                    else:
+                        cli_args.append(parent_dir)
                 if payload.get("minimal"):
                     cli_args.append("--minimal")
-                prev_approve = h.approve
-                h.approve = lambda _: True
+                overrides = (
+                    {"requirements_md": f"# Requirements — {name}\n\n{scrub(reqs_text)}\n"}
+                    if reqs_text
+                    else None
+                )
+                prev_approve = target_h.approve
+                target_h.approve = lambda _: True
                 try:
-                    msg = scaffold(h, cli_args)
+                    msg = scaffold(target_h, cli_args, overrides=overrides)
                 finally:
-                    h.approve = prev_approve
-                data = {"ok": True, "message": msg}
+                    target_h.approve = prev_approve
+                created_dir = (
+                    (target_h.root / name)
+                    if (not parent_dir or Path(parent_dir).expanduser().is_absolute())
+                    else (target_h.root / parent_dir / name)
+                ).resolve()
+                new_state = None
+                if payload.get("open_after") and created_dir.is_dir():
+                    new_state = ctrl.select_workspace(str(created_dir))
+                data = {
+                    "ok": True,
+                    "message": msg,
+                    "created_path": str(created_dir) if created_dir.is_dir() else "",
+                    "state": new_state,
+                }
             elif path == "/api/tools/open-external":
                 h = ctrl.get_harness(ws_param or None)
                 target = str(payload.get("target") or "folder")
@@ -1164,7 +1738,7 @@ def create_desktop_server(ctrl: DesktopController, host: str = "127.0.0.1", port
             self._respond(status, ctype, raw)
 
         def do_POST(self) -> None:
-            length = min(int(self.headers.get("Content-Length", "0") or 0), 512_000)
+            length = min(int(self.headers.get("Content-Length", "0") or 0), 10_000_000)
             body = self.rfile.read(length).decode("utf8", errors="replace") if length else "{}"
             try:
                 payload = json.loads(body or "{}")
@@ -1225,6 +1799,8 @@ def main(argv: list[str] | None = None) -> int:
         ctrl.attach_window(window)
         webview.start(debug=args.debug)
     finally:
+        ctrl.stop_watch()
+        ctrl.stop_terminal()
         server.shutdown()
         server.server_close()
     return 0

@@ -133,6 +133,35 @@ class SessionStore:
             )
             conn.commit()
 
+    def rename(self, key: str, new_name: str) -> dict:
+        target = self.get(key)
+        if not target:
+            raise ValueError(f"Session not found: {key}")
+        clean = " ".join((new_name or "").split()).strip()[:80]
+        if not clean:
+            raise ValueError("Session name cannot be empty.")
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE sessions SET name = ?, updated_at = ? WHERE id = ?",
+                (clean, _now(), target["id"]),
+            )
+            conn.commit()
+        return self.get(target["id"])  # type: ignore[return-value]
+
+    def search(self, query: str) -> list[dict]:
+        q = (query or "").strip().lower()
+        items = self.list_all()
+        if not q:
+            return items
+        matched: list[dict] = []
+        for s in items:
+            if q in (s.get("name") or "").lower() or q in (s.get("summary") or "").lower():
+                matched.append(s)
+                continue
+            if any(q in str(t.get("text") or "").lower() for t in (s.get("history") or [])):
+                matched.append(s)
+        return matched
+
     def fork(self, source_id: str, new_name: str = "") -> dict:
         source = self.get(source_id)
         if not source:

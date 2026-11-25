@@ -3,7 +3,7 @@
 import os
 import sys
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 # Ensure Windows cmd.exe / PowerShell consoles never crash with cp1252 UnicodeEncodeError
 # when rendering Rich UI banners, spinners, or Markdown output.

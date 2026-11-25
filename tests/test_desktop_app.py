@@ -40,7 +40,7 @@ def test_desktop_routes_bootstrap_files_sessions_terminal_and_inspector(tmp_path
     assert st == 200
     boot = json.loads(raw)
     assert boot["workspace_name"] == "demo_repo"
-    assert boot["version"] == "2.0.0"
+    assert boot["version"] == "2.1.0"
     assert boot["workspaces"][0]["name"] == "demo_repo"
 
     st, _, files_raw = dispatch_desktop_request(ctrl, "GET", "/api/files", {})
@@ -370,3 +370,163 @@ def test_desktop_model_syncs_across_workspaces_and_profile_switches(tmp_path, mo
     assert back_data["workspace_name"] == "ws_alpha"
     assert back_data["model"] == "ollama_chat/qwen2.5-coder:14b"
     assert back_data["mode"] == "full-auto"
+
+
+def test_desktop_v21_sessions_queue_image_terminal_watch_git_checkpoints_context_extensions(tmp_path):
+    import base64
+    import subprocess
+    import time
+
+    env_file = tmp_path / ".env"
+    ws = tmp_path / "v21_repo"
+    ws.mkdir()
+    (ws / "app.py").write_text("def greet():\n    return 'hi'\n", encoding="utf8")
+
+    # Initialize a real git repo for per-file diff, revert, commit, and checkpoints
+    subprocess.run(["git", "init"], cwd=ws, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=ws, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=ws, check=True)
+    subprocess.run(["git", "add", "."], cwd=ws, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=ws, check=True, capture_output=True)
+
+    ctrl = DesktopController(env_file, ws)
+
+    # 1. Session rename, fork, search
+    st, _, boot_raw = dispatch_desktop_request(ctrl, "GET", "/api/bootstrap", {})
+    boot = json.loads(boot_raw)
+    sid = boot["active_session_id"]
+    assert any(c["name"] == "/debug" for c in boot["commands"])
+
+    st, _, ren_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/session/rename", {"session_id": sid, "name": "Payment Refactor"}
+    )
+    assert st == 200 and json.loads(ren_raw)["ok"] is True
+
+    st, _, srch_raw = dispatch_desktop_request(ctrl, "GET", "/api/sessions/search?q=payment", {})
+    assert st == 200 and json.loads(srch_raw)["sessions"][0]["name"] == "Payment Refactor"
+
+    st, _, fork_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/session/fork", {"session_id": sid, "name": "Payment Experiment"}
+    )
+    assert st == 200 and json.loads(fork_raw)["session"]["name"] == "Payment Experiment"
+
+    # 2. Image paste upload
+    png_1x1 = base64.b64encode(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+        b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    ).decode()
+    st, _, img_raw = dispatch_desktop_request(
+        ctrl,
+        "POST",
+        "/api/chat/upload-image",
+        {"filename": "err.png", "data_url": f"data:image/png;base64,{png_1x1}"},
+    )
+    img_data = json.loads(img_raw)
+    assert st == 200 and img_data["ok"] is True and img_data["path"].startswith(".agent/uploads/")
+    assert (ws / img_data["path"]).is_file()
+
+    # 3. Context pin / unpin
+    st, _, pin_raw = dispatch_desktop_request(ctrl, "POST", "/api/context/pin", {"path": "app.py"})
+    assert st == 200 and "app.py" in json.loads(pin_raw)["state"]["pinned"]
+    st, _, unpin_raw = dispatch_desktop_request(ctrl, "POST", "/api/context/unpin", {"path": "app.py"})
+    assert st == 200 and "app.py" not in json.loads(unpin_raw)["state"]["pinned"]
+
+    # 4. Git per-file diff, revert, commit, and checkpoints
+    (ws / "app.py").write_text("def greet():\n    return 'hello world'\n", encoding="utf8")
+    st, _, diff_raw = dispatch_desktop_request(ctrl, "GET", "/api/diff", {})
+    diff_data = json.loads(diff_raw)
+    assert st == 200 and any(f["path"] == "app.py" and f["added"] >= 1 for f in diff_data["files"])
+
+    st, _, chk_c_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/checkpoints/create", {"label": "before-revert"}
+    )
+    chk_id = json.loads(chk_c_raw)["id"]
+    assert st == 200 and chk_id.startswith("chk_")
+
+    st, _, chk_l_raw = dispatch_desktop_request(ctrl, "GET", "/api/checkpoints", {})
+    assert st == 200 and any(c["id"] == chk_id for c in json.loads(chk_l_raw)["checkpoints"])
+
+    st, _, _ = dispatch_desktop_request(ctrl, "POST", "/api/git/revert-file", {"path": "app.py"})
+    assert st == 200 and "'hi'" in (ws / "app.py").read_text(encoding="utf8")
+
+    st, _, chk_d_raw = dispatch_desktop_request(ctrl, "POST", "/api/checkpoints/delete", {"id": chk_id})
+    assert st == 200 and json.loads(chk_d_raw)["ok"] is True
+
+    # 5. Streaming terminal start / status / stop
+    st, _, tstart = dispatch_desktop_request(
+        ctrl,
+        "POST",
+        "/api/terminal/start",
+        {"command": f'"{sys.executable}" -c "print(\'stream-ok\')"'},
+    )
+    assert st == 200 and json.loads(tstart)["ok"] is True
+    for _ in range(30):
+        _, _, tst_raw = dispatch_desktop_request(ctrl, "GET", "/api/terminal/status", {})
+        tst = json.loads(tst_raw)
+        if not tst["running"]:
+            break
+        time.sleep(0.1)
+    assert tst["exit_code"] == 0 and "stream-ok" in tst["output"]
+
+    # 6. Watch mode start / status / stop
+    st, _, wst_raw = dispatch_desktop_request(
+        ctrl,
+        "POST",
+        "/api/watch/start",
+        {"command": f'"{sys.executable}" -c "print(1)"', "interval": 0.4},
+    )
+    assert st == 200 and json.loads(wst_raw)["watch"]["running"] is True
+    st, _, wstop_raw = dispatch_desktop_request(ctrl, "POST", "/api/watch/stop", {})
+    assert st == 200 and json.loads(wstop_raw)["watch"]["running"] is False
+
+    # 7. Extensions CRUD (custom command, hooks, MCP add/remove)
+    st, _, cmd_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/extensions/command", {"name": "release", "body": "Ship $ARGUMENTS"}
+    )
+    assert st == 200 and json.loads(cmd_raw)["ok"] is True
+    st, _, hk_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/extensions/hooks", {"hooks": {"post_edit": ["echo edited"]}}
+    )
+    assert st == 200 and json.loads(hk_raw)["hooks"]["post_edit"] == ["echo edited"]
+    st, _, ma_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/extensions/mcp/add", {"name": "demo", "command": "npx", "args": "-y demo"}
+    )
+    assert st == 200 and json.loads(ma_raw)["ok"] is True
+    st, _, ext_raw = dispatch_desktop_request(ctrl, "GET", "/api/extensions", {})
+    ext_data = json.loads(ext_raw)
+    assert "demo" in ext_data["mcp_servers"]
+    assert any(c["name"] == "release" for c in ext_data["commands"])
+    st, _, mr_raw = dispatch_desktop_request(ctrl, "POST", "/api/extensions/mcp/remove", {"name": "demo"})
+    assert st == 200 and json.loads(mr_raw)["ok"] is True
+
+    # 8. Scaffold wizard with requirements & open_after
+    st, _, sc_raw = dispatch_desktop_request(
+        ctrl,
+        "POST",
+        "/api/tools/scaffold",
+        {
+            "template": "fastapi-service",
+            "name": "mini-api",
+            "parent_dir": str(tmp_path),
+            "requirements": "Provide /health endpoint.",
+            "minimal": True,
+            "open_after": True,
+        },
+    )
+    sc_data = json.loads(sc_raw)
+    assert st == 200 and sc_data["ok"] is True and sc_data["state"]["workspace_name"] == "mini-api"
+
+    # 9. Verify v2.1 UI features present in app.html
+    html = load_desktop_html()
+    for marker in (
+        "themeToggleBtn",
+        "renderMermaidSvg",
+        "highlightCodeBlock",
+        "renderDebugStepper",
+        "approvePlanBtn",
+        "sessionSearchInput",
+        "acMenu",
+        "watchPill",
+    ):
+        assert marker in html

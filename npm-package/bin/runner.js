@@ -79,16 +79,39 @@ function resolveBin(venvRoot, name) {
   return path.join(venvBinDir(venvRoot), name + ext);
 }
 
-function buildInstallSpec() {
+function wantsDesktop(entryName, argv = process.argv.slice(2)) {
+  if (entryName === 'adk-coder-app') return true;
+  return argv.some((a) => a === '--app' || a === '-app' || a === 'app');
+}
+
+function buildInstallSpec(includeDesktop = false) {
+  const extras = includeDesktop ? 'local,desktop' : 'local';
   const wheel = findBundledWheel();
   if (wheel) {
-    return `adk-coder[local] @ ${pathToFileURL(wheel).href}`;
+    return `adk-coder[${extras}] @ ${pathToFileURL(wheel).href}`;
   }
   const checkout = findSourceCheckout();
   if (checkout) {
-    return `${checkout}[local]`;
+    return `${checkout}[${extras}]`;
   }
-  return `adk-coder[local]==${pkg.version}`;
+  return `adk-coder[${extras}]==${pkg.version}`;
+}
+
+function ensureDesktopDependency(venvRoot) {
+  const py = resolveBin(venvRoot, 'python');
+  if (!fs.existsSync(py)) return;
+  const check = spawnSync(py, ['-c', 'import webview'], { stdio: 'ignore' });
+  if (check.status === 0) return;
+  process.stderr.write('Installing pywebview for ADK Coder native desktop window...\n');
+  const uvBin = findUv();
+  if (uvBin) {
+    spawnSync(uvBin, ['pip', 'install', '--python', py, 'pywebview>=5.3'], { stdio: 'inherit' });
+  } else {
+    const pip = resolveBin(venvRoot, 'pip');
+    if (fs.existsSync(pip)) {
+      spawnSync(pip, ['install', 'pywebview>=5.3'], { stdio: 'inherit' });
+    }
+  }
 }
 
 function wheelStamp(wheelPath) {
@@ -111,6 +134,8 @@ function ensureInstalled(entryName) {
   if (process.env.ADK_CODER_REINSTALL === '1' && fs.existsSync(venvRoot)) {
     fs.rmSync(venvRoot, { recursive: true, force: true });
   }
+
+  const needDesktop = wantsDesktop(entryName);
 
   if (fs.existsSync(targetBin)) {
     // Fast-update only the adk-coder wheel when a rebuilt tarball ships a newer wheel
@@ -139,10 +164,11 @@ function ensureInstalled(entryName) {
         } catch (_) {}
       }
     }
+    if (needDesktop) ensureDesktopDependency(venvRoot);
     return targetBin;
   }
 
-  const installSpec = buildInstallSpec();
+  const installSpec = buildInstallSpec(needDesktop);
   fs.mkdirSync(path.dirname(venvRoot), { recursive: true });
   process.stderr.write(`Setting up adk-coder v${pkg.version} environment (first run)...\n`);
 
@@ -207,4 +233,4 @@ function run(entryName) {
   process.exit(res.status === null ? 1 : res.status);
 }
 
-module.exports = { run, buildInstallSpec, findBundledWheel, findUv };
+module.exports = { run, buildInstallSpec, findBundledWheel, findUv, wantsDesktop };
