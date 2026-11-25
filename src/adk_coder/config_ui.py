@@ -1097,11 +1097,17 @@ async function loadProfiles() {
           <div style="font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;"><code>${esc(p.model)}</code> · ${esc(p.provider)} · mode: ${esc(p.mode || 'ask')}</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;">
-          <button type="button" class="btn tonal" onclick="useProfile(${JSON.stringify(n)})">Use</button>
-          <button type="button" class="btn" onclick="deleteProfile(${JSON.stringify(n)})">Delete</button>
+          <button type="button" class="btn tonal" data-use-profile="${esc(n)}">Use</button>
+          <button type="button" class="btn" data-delete-profile="${esc(n)}">Delete</button>
         </div>
       </div>`;
     }).join('');
+    list.querySelectorAll('[data-use-profile]').forEach(btn => {
+      btn.addEventListener('click', () => window.useProfile(btn.dataset.useProfile));
+    });
+    list.querySelectorAll('[data-delete-profile]').forEach(btn => {
+      btn.addEventListener('click', () => window.deleteProfile(btn.dataset.deleteProfile));
+    });
   } catch (_) {}
 }
 

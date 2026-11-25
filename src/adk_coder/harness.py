@@ -382,11 +382,11 @@ class AgentHarness:
             dirty=dirty,
         )
 
-    def reload_config(self) -> None:
+    def reload_config(self, env_path: Path | None = None) -> None:
         """Reload .agent/config.json and .env after in-REPL Config Studio edits."""
         from .config_ui import default_env_path, parse_env_file
 
-        for key, val in parse_env_file(default_env_path()).items():
+        for key, val in parse_env_file(env_path or default_env_path()).items():
             os.environ[key] = val
         try:
             self.config = json.loads(self.read("config.json"))

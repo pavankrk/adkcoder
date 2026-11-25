@@ -79,6 +79,24 @@
     color: var(--text); cursor: pointer;
   }
   .ws-group-head:hover { background: var(--hover); }
+  .ws-group-head.active { background: var(--active); color: var(--focus); }
+  .toast {
+    position: fixed; bottom: 18px; right: 18px; z-index: 80;
+    max-width: 420px; padding: 10px 14px; border-radius: 10px;
+    background: #1f2328; color: #fff; font-size: 12.5px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18); display: none;
+  }
+  .toast.err { background: var(--red); }
+  .toast.show { display: block; }
+  .profile-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px;
+  }
+  .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 500;
+    background: var(--active); color: var(--focus);
+  }
+  .badge.ok { background: #dafbe1; color: var(--green); }
   .sess-row {
     display: flex; flex-direction: column; gap: 2px;
     padding: 6px 10px 6px 20px; border-radius: 8px; cursor: pointer;
@@ -117,9 +135,45 @@
     display: inline-flex; align-items: center; gap: 6px; user-select: none;
   }
   .steps-list {
-    margin: 4px 0 6px; padding: 8px 12px; border-left: 2px solid var(--border);
-    font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px;
+    margin: 4px 0 6px; padding: 6px 0;
+    font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 6px;
   }
+  .step-mini {
+    display: flex; align-items: center; gap: 7px; padding: 3px 8px;
+    border-radius: 6px; background: #fafbfc; border: 1px solid #eef0f4; color: var(--muted);
+  }
+  .step-card {
+    border: 1px solid var(--border); border-radius: 10px; background: #fff; overflow: hidden;
+  }
+  .step-card-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 11px; background: #f8f9fb; cursor: pointer; list-style: none;
+    font-size: 12px; color: var(--text); user-select: none;
+  }
+  .step-card-head::-webkit-details-marker { display: none; }
+  .step-card-left { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .step-card-path {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .step-card-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 11px; }
+  .step-code {
+    margin: 0; padding: 10px 12px; background: #fcfcfd; border-top: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.45;
+    max-height: 260px; overflow: auto; white-space: pre; color: var(--text);
+  }
+  .step-shell {
+    margin: 0; padding: 9px 12px; background: #0d1117; color: #e6edf3; border-top: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.45;
+    max-height: 180px; overflow: auto; white-space: pre-wrap;
+  }
+  .step-open-btn {
+    border: 1px solid var(--border); background: #fff; color: var(--focus);
+    font-size: 11px; padding: 1px 7px; border-radius: 5px; cursor: pointer;
+  }
+  .step-open-btn:hover { background: var(--active); }
+  .st-ok { color: var(--green); font-weight: 700; }
+  .st-err { color: var(--red); font-weight: 700; }
   .thought-box {
     font-size: 12px; color: var(--muted); background: #fafbfc;
     border-left: 2px solid #d0d7de; padding: 6px 10px; border-radius: 4px;
@@ -357,11 +411,23 @@
   </div>
 </div>
 
+<div id="toast" class="toast"></div>
+
 <script>
 let appState = null;
 let drawerKind = null;
 let liveTurn = null;
 let pendingApproval = null;
+let toastTimer = null;
+
+function showToast(msg, isErr = false) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = String(msg || '');
+  el.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.remove('show'); }, isErr ? 4500 : 2500);
+}
 
 function esc(v) {
   return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
@@ -442,8 +508,15 @@ function renderTopAndSidebar() {
   const profSel = document.getElementById('profileSelect');
   const profs = (appState.profiles && appState.profiles.profiles) || {};
   const names = Object.keys(profs).sort();
-  profSel.innerHTML = `<option value="">Profile: ${esc(appState.profiles?.active || 'default')}</option>` +
-    names.map(n => `<option value="${esc(n)}" ${n === appState.profiles?.active ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const activeProf = appState.profiles?.active || '';
+  if (!names.length) {
+    profSel.innerHTML = '<option value="" disabled selected>Profile: default</option>';
+  } else {
+    const placeholder = activeProf ? '' : '<option value="" disabled selected>Select profile…</option>';
+    profSel.innerHTML = placeholder + names.map(n =>
+      `<option value="${esc(n)}" ${n === activeProf ? 'selected' : ''}>Profile: ${esc(n)}</option>`
+    ).join('');
+  }
 
   // Sidebar workspaces & sessions
   const sc = document.getElementById('sessionsScroll');
@@ -459,9 +532,9 @@ function renderTopAndSidebar() {
       </div>`;
     }).join('');
     return `<div class="ws-group">
-      <div class="ws-group-head" data-select-ws="${esc(ws.path)}">
-        <span>📁 ${esc(ws.name)}</span>
-        <span style="font-size:11px;font-weight:500;">${diffBadge}</span>
+      <div class="ws-group-head ${ws.active ? 'active' : ''}" data-select-ws="${esc(ws.path)}" title="${esc(ws.path)}">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📁 ${esc(ws.name)}</span>
+        <span style="font-size:11px;font-weight:500;flex-shrink:0;">${diffBadge}</span>
       </div>
       ${sessHtml}
     </div>`;
@@ -469,18 +542,121 @@ function renderTopAndSidebar() {
 
   sc.querySelectorAll('[data-select-ws]').forEach(el => {
     el.onclick = async () => {
-      appState = await apiPost('/api/workspace/select', { workspace: el.dataset.selectWs });
-      renderAll();
+      try {
+        appState = await apiPost('/api/workspace/select', { workspace: el.dataset.selectWs });
+        renderAll();
+        showToast('Switched workspace to ' + appState.workspace_name);
+      } catch (err) {
+        showToast('Workspace switch failed: ' + err.message, true);
+      }
     };
   });
   sc.querySelectorAll('[data-sess]').forEach(el => {
     el.onclick = async () => {
-      await apiPost('/api/workspace/select', { workspace: el.dataset.ws });
-      const res = await apiPost('/api/session/select', { workspace: el.dataset.ws, session_id: el.dataset.sess });
-      appState = res.state;
-      renderAll();
+      try {
+        await apiPost('/api/workspace/select', { workspace: el.dataset.ws });
+        const res = await apiPost('/api/session/select', { workspace: el.dataset.ws, session_id: el.dataset.sess });
+        appState = res.state;
+        renderAll();
+      } catch (err) {
+        showToast('Session switch failed: ' + err.message, true);
+      }
     };
   });
+}
+
+function renderDiffPreview(oldBlk, newBlk) {
+  const parts = [];
+  if (oldBlk) {
+    oldBlk.split('\n').forEach(ln => parts.push(`<span class="diff-line-del">- ${esc(ln)}</span>`));
+  }
+  if (newBlk) {
+    newBlk.split('\n').forEach(ln => parts.push(`<span class="diff-line-add">+ ${esc(ln)}</span>`));
+  }
+  return parts.join('') || '<span style="color:var(--muted);">(applying edit...)</span>';
+}
+
+function renderStepItem(s, openByDefault = false) {
+  const stIcon = s.status === 'running'
+    ? '<span class="spinner"></span>'
+    : (s.status === 'error' ? '<span class="st-err">✕</span>' : '<span class="st-ok">✓</span>');
+  const openBtn = s.file_path && s.status !== 'running'
+    ? `<button type="button" class="step-open-btn" data-view-file="${esc(s.file_path)}">Open</button>`
+    : '';
+
+  if (s.kind === 'write' || s.name === 'write_file') {
+    const linesBadge = s.lines_added ? `<span class="diff-add">+${s.lines_added} lines</span>` : '';
+    const verb = s.status === 'running' ? 'Writing' : (s.status === 'error' ? 'Failed' : 'Written');
+    const codeText = s.content
+      ? esc(s.content) + (s.truncated ? '\n\n… truncated (click Open to inspect full file)' : '')
+      : '<span style="color:var(--muted);">Preparing file contents...</span>';
+    return `<details class="step-card" ${openByDefault ? 'open' : ''}>
+      <summary class="step-card-head">
+        <div class="step-card-left">${stIcon}<span>📝</span><span class="step-card-path">${esc(s.file_path || 'file')}</span></div>
+        <div class="step-card-right">${linesBadge}<span style="color:var(--muted);">${verb}</span>${openBtn}</div>
+      </summary>
+      <pre class="step-code"><code>${codeText}</code></pre>
+    </details>`;
+  }
+
+  if (s.kind === 'diff' || s.name === 'apply_diff' || s.name === 'apply_multi_diff') {
+    const badges = [
+      s.lines_added ? `<span class="diff-add">+${s.lines_added}</span>` : '',
+      s.lines_removed ? `<span class="diff-del">-${s.lines_removed}</span>` : '',
+    ].filter(Boolean).join(' ');
+    const verb = s.status === 'running' ? 'Editing' : (s.status === 'error' ? 'Failed' : 'Edited');
+    return `<details class="step-card" ${openByDefault ? 'open' : ''}>
+      <summary class="step-card-head">
+        <div class="step-card-left">${stIcon}<span>✏️</span><span class="step-card-path">${esc(s.file_path || 'file')}</span></div>
+        <div class="step-card-right">${badges}<span style="color:var(--muted);">${verb}</span>${openBtn}</div>
+      </summary>
+      <pre class="step-code">${renderDiffPreview(s.search_block || '', s.replace_block || '')}</pre>
+    </details>`;
+  }
+
+  if (s.kind === 'shell' || s.name === 'run_shell_command') {
+    const outHtml = s.result_preview
+      ? `<pre class="step-shell">$ ${esc(s.command || '')}\n${esc(s.result_preview)}</pre>`
+      : `<pre class="step-shell">$ ${esc(s.command || '')}</pre>`;
+    return `<details class="step-card" ${openByDefault ? 'open' : ''}>
+      <summary class="step-card-head">
+        <div class="step-card-left">${stIcon}<span>❯</span><span class="step-card-path">${esc(s.command || s.summary || 'shell')}</span></div>
+        <div class="step-card-right"><span style="color:var(--muted);">${s.status === 'running' ? 'Running' : 'Done'}</span></div>
+      </summary>
+      ${outHtml}
+    </details>`;
+  }
+
+  return `<div class="step-mini">${stIcon}<span>${esc(s.summary || s.name)}</span>${openBtn}</div>`;
+}
+
+function renderStepsGroup(steps, { live = false, elapsed_s = null } = {}) {
+  if (!steps || !steps.length) return '';
+  const writeCount = steps.filter(s => s.kind === 'write' || s.kind === 'diff').length;
+  const lastIdx = steps.length - 1;
+  const cards = steps.map((s, idx) => {
+    const isCodeCard = s.kind === 'write' || s.kind === 'diff';
+    const openDefault = live && isCodeCard && (s.status === 'running' || idx === lastIdx);
+    return renderStepItem(s, openDefault);
+  }).join('');
+
+  if (live) {
+    const latest = steps[lastIdx];
+    const headline = latest?.status === 'running' && latest?.summary
+      ? `${latest.summary}... (${steps.length} step${steps.length === 1 ? '' : 's'})`
+      : `${steps.length} step${steps.length === 1 ? '' : 's'} running...`;
+    return `<details open>
+      <summary class="steps-summary"><span class="spinner"></span> ${esc(headline)}</summary>
+      <div class="steps-list">${cards}</div>
+    </details>`;
+  }
+
+  const timeTag = elapsed_s != null ? ` in ${elapsed_s}s` : '';
+  const editTag = writeCount ? ` · ${writeCount} file edit${writeCount === 1 ? '' : 's'}` : '';
+  return `<details ${writeCount ? 'open' : ''}>
+    <summary class="steps-summary">Completed ${steps.length} step${steps.length === 1 ? '' : 's'}${timeTag}${editTag}</summary>
+    <div class="steps-list">${cards}</div>
+  </details>`;
 }
 
 function renderChat() {
@@ -513,7 +689,11 @@ function renderChat() {
     if (turn.role === 'user') {
       html += `<div class="msg-user-wrap"><div class="msg-user">${esc(turn.text)}</div></div>`;
     } else {
+      const histStepsHtml = Array.isArray(turn.steps) && turn.steps.length
+        ? renderStepsGroup(turn.steps, { live: false, elapsed_s: turn.elapsed_s })
+        : '';
       html += `<div class="msg-agent">
+        ${histStepsHtml}
         <div class="md-body">${renderMarkdown(turn.text)}</div>
         <div class="agent-footer">
           <button class="icon-btn" style="width:24px;height:24px;" data-copy-turn="${idx}" title="Copy">📋</button>
@@ -530,9 +710,7 @@ function renderChat() {
   if (liveTurn) {
     html += `<div class="msg-user-wrap"><div class="msg-user">${esc(liveTurn.userMessage)}</div><div class="msg-time">${esc(liveTurn.startedTime)}</div></div>`;
     const stepsHtml = liveTurn.steps.length
-      ? `<details open><summary class="steps-summary"><span class="spinner"></span> ${liveTurn.steps.length} step(s) running...</summary>
-           <div class="steps-list">${liveTurn.steps.map(s => `<div>⚙ <code>${esc(s.name)}</code> ${esc(JSON.stringify(s.args || {})).slice(0, 100)}</div>`).join('')}</div>
-         </details>`
+      ? renderStepsGroup(liveTurn.steps, { live: true })
       : `<div class="steps-summary"><span class="spinner"></span> Thinking...</div>`;
     const thoughtHtml = liveTurn.thought ? `<div class="thought-box">${esc(liveTurn.thought)}</div>` : '';
     const approvalHtml = pendingApproval
@@ -554,6 +732,26 @@ function renderChat() {
   }
 
   container.innerHTML = html;
+
+  container.querySelectorAll('[data-view-file]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const fp = btn.dataset.viewFile;
+      await loadDrawer('files');
+      try {
+        const r = await apiGet(`/api/file?workspace=${encodeURIComponent(appState.workspace)}&path=${encodeURIComponent(fp)}`);
+        const pre = document.getElementById('filePreview');
+        if (pre) {
+          pre.style.display = 'block';
+          pre.textContent = r.content || '';
+          pre.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      } catch (err) {
+        showToast('Could not open file: ' + err.message, true);
+      }
+    };
+  });
 
   container.querySelectorAll('[data-copy-code]').forEach(btn => {
     btn.onclick = () => {
@@ -595,18 +793,90 @@ function renderAll() {
   if (drawerKind) loadDrawer(drawerKind);
 }
 
+let turnPollTimer = null;
+
+function stopTurnPoller() {
+  if (turnPollTimer) {
+    clearInterval(turnPollTimer);
+    turnPollTimer = null;
+  }
+}
+
+async function finishLiveTurnFromServer(errorMsg) {
+  stopTurnPoller();
+  liveTurn = null;
+  pendingApproval = null;
+  try {
+    const fresh = await apiGet('/api/bootstrap');
+    appState = fresh;
+    appState.busy = false;
+  } catch (_) {
+    if (appState) appState.busy = false;
+  }
+  if (errorMsg) showToast('Agent error: ' + errorMsg, true);
+  renderAll();
+}
+
+function upsertLiveStep(step) {
+  if (!liveTurn || !step) return;
+  const idx = liveTurn.steps.findIndex(s => s.id === step.id);
+  if (idx >= 0) liveTurn.steps[idx] = step;
+  else liveTurn.steps.push(step);
+}
+
+function startTurnPoller() {
+  stopTurnPoller();
+  turnPollTimer = setInterval(async () => {
+    if (!liveTurn) {
+      stopTurnPoller();
+      return;
+    }
+    try {
+      const st = await apiGet('/api/chat/status');
+      if (!liveTurn) return;
+      // Sync live streamed fields & step cards even if WKWebView SSE buffers
+      let changed = false;
+      if (st.text && st.text.length > (liveTurn.text || '').length) {
+        liveTurn.text = st.text;
+        changed = true;
+      }
+      if (st.thought && st.thought.length > (liveTurn.thought || '').length) {
+        liveTurn.thought = st.thought;
+        changed = true;
+      }
+      if (Array.isArray(st.steps) && JSON.stringify(st.steps) !== JSON.stringify(liveTurn.steps)) {
+        liveTurn.steps = st.steps;
+        changed = true;
+      }
+      if (st.pending_approval && (!pendingApproval || pendingApproval.id !== st.pending_approval.id)) {
+        pendingApproval = st.pending_approval;
+        changed = true;
+      }
+      if (changed) renderChat();
+
+      const expectedId = liveTurn.turnId || 0;
+      if (!st.busy && (!expectedId || st.done_turn_id >= expectedId)) {
+        await finishLiveTurnFromServer(st.status === 'error' ? st.error : '');
+      }
+    } catch (_) {}
+  }, 400);
+}
+
 async function sendMessage(overrideText) {
   const input = document.getElementById('promptInput');
   const msg = (overrideText ?? input.value).trim();
   if (!msg) return;
   if (!overrideText) input.value = '';
-  liveTurn = { userMessage: msg, startedTime: nowTime(), steps: [], thought: '', text: '' };
+  liveTurn = { turnId: 0, userMessage: msg, startedTime: nowTime(), steps: [], thought: '', text: '' };
   renderAll();
   try {
-    await apiPost('/api/chat/send', { workspace: appState.workspace, message: msg });
+    const r = await apiPost('/api/chat/send', { workspace: appState.workspace, message: msg });
+    if (liveTurn && r && r.turn_id) liveTurn.turnId = r.turn_id;
+    startTurnPoller();
   } catch (err) {
+    stopTurnPoller();
     liveTurn = null;
-    alert(String(err));
+    showToast(err.message || String(err), true);
     renderAll();
   }
 }
@@ -710,7 +980,33 @@ async function openCustomizationsModal() {
   const prof = await apiGet('/api/profiles');
   const profNames = Object.keys(prof.profiles || {}).sort();
 
+  const profilesListHtml = profNames.length
+    ? profNames.map(n => {
+        const p = (prof.profiles || {})[n] || {};
+        const badges = [];
+        if (n === prof.active) badges.push('<span class="badge">Active</span>');
+        if (n === prof.fallback) badges.push('<span class="badge ok">Fallback</span>');
+        return `<div class="profile-row">
+          <div style="min-width:0;">
+            <div style="font-weight:600;display:flex;align-items:center;gap:6px;">${esc(n)} ${badges.join(' ')}</div>
+            <div style="font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;"><code>${esc(p.model || '')}</code> · ${esc(p.provider || '')} · mode: ${esc(p.mode || 'ask')}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0;">
+            <button type="button" class="btn primary" data-use-prof="${esc(n)}">Use</button>
+            <button type="button" class="btn danger" data-del-prof="${esc(n)}">Delete</button>
+          </div>
+        </div>`;
+      }).join('')
+    : '<div style="font-size:12.5px;color:var(--muted);">No saved profiles yet.</div>';
+
   body.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--sidebar);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;">
+      <div style="min-width:0;">
+        <div style="font-size:11px;color:var(--muted);">Active Workspace</div>
+        <div style="font-family:var(--mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(appState.workspace)}</div>
+      </div>
+      <button type="button" id="cSwitchWsBtn" class="btn">Switch…</button>
+    </div>
     <div class="form-grid">
       <div class="field"><label>Provider</label>
         <select id="cProv">${['openai-compatible','ollama','gemini','anthropic','openrouter','groq'].map(p => `<option ${p===st.provider?'selected':''}>${p}</option>`).join('')}</select>
@@ -725,23 +1021,26 @@ async function openCustomizationsModal() {
       <div class="field full"><label>Test Command</label><input id="cTest" value="${esc(st.test_command || '')}" placeholder="pytest -q or mvn -B test" /></div>
     </div>
     <div style="display:flex;gap:8px;margin-top:12px;">
-      <button id="cTestBtn" class="btn">Test Connection</button>
-      <button id="cSaveBtn" class="btn primary">Save Settings</button>
+      <button type="button" id="cTestBtn" class="btn">Test Connection</button>
+      <button type="button" id="cSaveBtn" class="btn primary">Save Settings</button>
     </div>
     <div id="cStatus" class="status-note" style="display:none;"></div>
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;" />
     <div style="font-weight:600;margin-bottom:8px;">Saved Profiles &amp; Auto-Fallback</div>
     <div style="display:flex;gap:8px;margin-bottom:10px;">
       <input id="pName" placeholder="Profile name (e.g. LocalOrnith)" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:8px;" />
-      <button id="pSaveBtn" class="btn">Save Profile</button>
+      <button type="button" id="pSaveBtn" class="btn">Save Profile</button>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:10px;">
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
       <select id="pFbSel" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:8px;">
         <option value="">Auto-fallback: Disabled</option>
         ${profNames.map(n => `<option value="${esc(n)}" ${n===prof.fallback?'selected':''}>Fallback: ${esc(n)}</option>`).join('')}
       </select>
-      <button id="pFbBtn" class="btn">Set Fallback</button>
-    </div>`;
+      <button type="button" id="pFbBtn" class="btn">Set Fallback</button>
+    </div>
+    <div id="cProfilesList">${profilesListHtml}</div>`;
+
+  document.getElementById('cSwitchWsBtn').onclick = () => openWorkspaceModal();
 
   const getForm = () => ({
     provider: document.getElementById('cProv').value,
@@ -758,30 +1057,200 @@ async function openCustomizationsModal() {
 
   document.getElementById('cTestBtn').onclick = async () => {
     note('Testing connection...');
-    const r = await apiPost('/api/test', getForm());
-    note(r.ok ? `Connected (${r.latency_ms} ms): ${r.reply}` : `Failed: ${r.message} ${r.hint || ''}`);
+    try {
+      const r = await apiPost('/api/test', getForm());
+      note(r.ok ? `Connected (${r.latency_ms} ms): ${r.reply}` : `Failed: ${r.message} ${r.hint || ''}`);
+    } catch (err) { note('Test error: ' + err.message); }
   };
   document.getElementById('cSaveBtn').onclick = async () => {
-    const r = await apiPost('/api/save', getForm());
-    note(r.ok ? `Saved ${r.model}.` : `Error: ${r.error}`);
-    appState = await apiGet('/api/bootstrap');
-    renderAll();
+    try {
+      const r = await apiPost('/api/save', getForm());
+      note(r.ok ? `Saved ${r.model}.` : `Error: ${r.error}`);
+      appState = await apiGet('/api/bootstrap');
+      renderAll();
+    } catch (err) { note('Save error: ' + err.message); }
   };
   document.getElementById('pSaveBtn').onclick = async () => {
     const name = document.getElementById('pName').value.trim();
-    if (!name) return;
-    await apiPost('/api/profiles/save', { ...getForm(), name });
-    appState = await apiGet('/api/bootstrap');
-    renderAll();
-    openCustomizationsModal();
+    if (!name) { note('Enter a profile name first.'); return; }
+    try {
+      await apiPost('/api/profiles/save', { ...getForm(), name });
+      appState = await apiGet('/api/bootstrap');
+      renderAll();
+      await openCustomizationsModal();
+      showToast(`Saved profile "${name}"`);
+    } catch (err) { note('Profile save error: ' + err.message); }
   };
   document.getElementById('pFbBtn').onclick = async () => {
-    await apiPost('/api/profiles/fallback', { name: document.getElementById('pFbSel').value });
-    appState = await apiGet('/api/bootstrap');
-    renderAll();
-    note('Updated fallback profile.');
+    try {
+      await apiPost('/api/profiles/fallback', { name: document.getElementById('pFbSel').value });
+      appState = await apiGet('/api/bootstrap');
+      renderAll();
+      await openCustomizationsModal();
+      showToast('Updated fallback profile');
+    } catch (err) { note('Fallback error: ' + err.message); }
   };
+  body.querySelectorAll('[data-use-prof]').forEach(btn => {
+    btn.onclick = async () => {
+      const name = btn.dataset.useProf;
+      try {
+        await apiPost('/api/profiles/use', { name, workspace: appState.workspace });
+        appState = await apiGet('/api/bootstrap');
+        renderAll();
+        await openCustomizationsModal();
+        showToast(`Switched to profile "${name}"`);
+      } catch (err) { note('Switch error: ' + err.message); }
+    };
+  });
+  body.querySelectorAll('[data-del-prof]').forEach(btn => {
+    btn.onclick = async () => {
+      const name = btn.dataset.delProf;
+      try {
+        await apiPost('/api/profiles/delete', { name });
+        appState = await apiGet('/api/bootstrap');
+        renderAll();
+        await openCustomizationsModal();
+        showToast(`Deleted profile "${name}"`);
+      } catch (err) { note('Delete error: ' + err.message); }
+    };
+  });
   modalBg.classList.add('open');
+}
+
+function openWorkspaceModal() {
+  const modalBg = document.getElementById('modalBg');
+  document.getElementById('modalTitle').textContent = 'Switch or Open Workspace';
+  const body = document.getElementById('modalBody');
+  const wsList = (appState && appState.workspaces) || [];
+  body.innerHTML = `
+    <div style="margin-bottom:12px;">
+      <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:500;">Folder path (supports ~ or full path)</label>
+      <div style="display:flex;gap:8px;">
+        <input id="wsPathInput" value="${esc(appState?.workspace || '')}" placeholder="/Users/you/path/to/project" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-family:var(--mono);font-size:12.5px;" />
+        <button type="button" id="wsOpenPathBtn" class="btn primary">Open</button>
+        <button type="button" id="wsBrowseBtn" class="btn">Browse…</button>
+      </div>
+    </div>
+    <div id="wsModalStatus" class="status-note" style="display:none;margin-bottom:12px;"></div>
+    <div style="font-size:12px;font-weight:600;color:var(--muted);margin:14px 0 8px;">Recent Workspaces</div>
+    <div id="wsRecentList">
+      ${wsList.map(ws => `
+        <div class="profile-row">
+          <div style="min-width:0;">
+            <div style="font-weight:600;display:flex;align-items:center;gap:6px;">
+              <span>📁 ${esc(ws.name)}</span>
+              ${ws.active ? '<span class="badge">Active</span>' : ''}
+              ${ws.branch ? `<span style="font-size:11px;color:var(--muted);">${esc(ws.branch)}</span>` : ''}
+            </div>
+            <div style="font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(ws.path)}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0;">
+            ${ws.active ? '' : `<button type="button" class="btn primary" data-modal-ws="${esc(ws.path)}">Switch</button>`}
+            ${wsList.length > 1 ? `<button type="button" class="btn" data-remove-ws="${esc(ws.path)}" title="Remove from list">✕</button>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+
+  const setWsNote = (txt, isErr = false) => {
+    const el = document.getElementById('wsModalStatus');
+    el.style.display = 'block';
+    el.style.color = isErr ? 'var(--red)' : 'var(--text)';
+    el.textContent = txt;
+  };
+
+  const openPath = async () => {
+    const target = document.getElementById('wsPathInput').value.trim();
+    if (!target) { setWsNote('Enter a workspace folder path.', true); return; }
+    try {
+      appState = await apiPost('/api/workspace/select', { workspace: target });
+      modalBg.classList.remove('open');
+      renderAll();
+      showToast('Opened workspace: ' + appState.workspace_name);
+    } catch (err) {
+      setWsNote('Cannot open workspace: ' + err.message, true);
+    }
+  };
+
+  document.getElementById('wsOpenPathBtn').onclick = openPath;
+  document.getElementById('wsPathInput').onkeydown = (e) => { if (e.key === 'Enter') openPath(); };
+  document.getElementById('wsBrowseBtn').onclick = async () => {
+    const btn = document.getElementById('wsBrowseBtn');
+    btn.disabled = true;
+    setWsNote('Opening folder picker...');
+    try {
+      const r = await apiPost('/api/workspace/pick', {});
+      if (r.ok && r.state) {
+        appState = r.state;
+        modalBg.classList.remove('open');
+        renderAll();
+        showToast('Opened workspace: ' + appState.workspace_name);
+      } else if (r.cancelled) {
+        setWsNote('Folder selection cancelled.');
+      } else {
+        setWsNote(r.error || 'Folder picker unavailable — type or paste a folder path above and click Open.', true);
+      }
+    } catch (err) {
+      setWsNote('Folder picker error: ' + err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  body.querySelectorAll('[data-modal-ws]').forEach(btn => {
+    btn.onclick = async () => {
+      try {
+        appState = await apiPost('/api/workspace/select', { workspace: btn.dataset.modalWs });
+        modalBg.classList.remove('open');
+        renderAll();
+        showToast('Switched workspace to ' + appState.workspace_name);
+      } catch (err) {
+        setWsNote('Switch failed: ' + err.message, true);
+      }
+    };
+  });
+  body.querySelectorAll('[data-remove-ws]').forEach(btn => {
+    btn.onclick = async () => {
+      try {
+        appState = await apiPost('/api/workspace/remove', { workspace: btn.dataset.removeWs });
+        renderAll();
+        openWorkspaceModal();
+      } catch (err) {
+        setWsNote('Remove failed: ' + err.message, true);
+      }
+    };
+  });
+  modalBg.classList.add('open');
+  setTimeout(() => document.getElementById('wsPathInput')?.focus(), 40);
+}
+
+async function openAttachFileModal() {
+  const modalBg = document.getElementById('modalBg');
+  document.getElementById('modalTitle').textContent = 'Attach @file Reference';
+  const body = document.getElementById('modalBody');
+  const d = await apiGet('/api/files?workspace=' + encodeURIComponent(appState.workspace));
+  const allFiles = d.files || [];
+  body.innerHTML = `
+    <input id="attachSearch" placeholder="Filter workspace files..." style="width:100%;border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:10px;" />
+    <div id="attachList" style="max-height:360px;overflow-y:auto;"></div>`;
+  const renderFiles = (q) => {
+    const matched = allFiles.filter(f => !q || f.toLowerCase().includes(q.toLowerCase())).slice(0, 120);
+    const list = document.getElementById('attachList');
+    list.innerHTML = matched.length
+      ? matched.map(f => `<div class="file-row" data-attach="${esc(f)}">${esc(f)}</div>`).join('')
+      : '<div style="font-size:12.5px;color:var(--muted);">No matching files.</div>';
+    list.querySelectorAll('[data-attach]').forEach(row => {
+      row.onclick = () => {
+        const inp = document.getElementById('promptInput');
+        inp.value = (inp.value ? inp.value + ' ' : '') + '@' + row.dataset.attach + ' ';
+        modalBg.classList.remove('open');
+        inp.focus();
+      };
+    });
+  };
+  renderFiles('');
+  document.getElementById('attachSearch').oninput = (e) => renderFiles(e.target.value);
+  modalBg.classList.add('open');
+  setTimeout(() => document.getElementById('attachSearch')?.focus(), 40);
 }
 
 function openAutomationsModal() {
@@ -822,6 +1291,7 @@ function openAutomationsModal() {
 document.getElementById('toggleSidebarBtn').onclick = () => document.getElementById('mainBody').classList.toggle('sidebar-collapsed');
 document.getElementById('closeDrawerBtn').onclick = () => { drawerKind = null; document.getElementById('rightDrawer').classList.remove('open'); };
 document.getElementById('closeModalBtn').onclick = () => document.getElementById('modalBg').classList.remove('open');
+document.getElementById('modalBg').onclick = (e) => { if (e.target.id === 'modalBg') e.target.classList.remove('open'); };
 document.getElementById('customizationsBtn').onclick = openCustomizationsModal;
 document.getElementById('automationsBtn').onclick = openAutomationsModal;
 document.getElementById('openCodeBtn').onclick = () => apiPost('/api/tools/open-external', { workspace: appState.workspace, target: 'folder' });
@@ -833,21 +1303,8 @@ document.getElementById('newSessionBtn').onclick = async () => {
   renderAll();
 };
 
-const pickWs = async () => {
-  const r = await apiPost('/api/workspace/pick', {});
-  if (r.ok && r.state) {
-    appState = r.state;
-    renderAll();
-  } else if (!r.cancelled) {
-    const manual = prompt('Enter full workspace folder path:', appState.workspace || '');
-    if (manual && manual.trim()) {
-      appState = await apiPost('/api/workspace/select', { workspace: manual.trim() });
-      renderAll();
-    }
-  }
-};
-document.getElementById('addWsBtn').onclick = pickWs;
-document.getElementById('wsPill').onclick = pickWs;
+document.getElementById('addWsBtn').onclick = openWorkspaceModal;
+document.getElementById('wsPill').onclick = openWorkspaceModal;
 
 document.querySelectorAll('[data-open-drawer]').forEach(btn => {
   btn.onclick = () => {
@@ -865,24 +1322,34 @@ document.getElementById('modeSelect').onchange = async (e) => {
 
 document.getElementById('profileSelect').onchange = async (e) => {
   if (!e.target.value) return;
-  await apiPost('/api/profiles/use', { name: e.target.value, workspace: appState.workspace });
-  appState = await apiGet('/api/bootstrap');
-  renderAll();
-};
-
-document.getElementById('attachFileBtn').onclick = async () => {
-  const d = await apiGet('/api/files?workspace=' + encodeURIComponent(appState.workspace));
-  const choice = prompt('Insert @file reference (e.g. ' + ((d.files || []).slice(0, 3).join(', ')) + '):');
-  if (choice && choice.trim()) {
-    const inp = document.getElementById('promptInput');
-    inp.value = (inp.value ? inp.value + ' ' : '') + '@' + choice.trim() + ' ';
-    inp.focus();
+  try {
+    await apiPost('/api/profiles/use', { name: e.target.value, workspace: appState.workspace });
+    appState = await apiGet('/api/bootstrap');
+    renderAll();
+    showToast('Switched to profile: ' + e.target.value);
+  } catch (err) {
+    showToast('Profile switch failed: ' + err.message, true);
   }
 };
 
-document.getElementById('sendBtn').onclick = () => {
-  if (appState?.busy || liveTurn) apiPost('/api/chat/abort', {});
-  else sendMessage();
+document.getElementById('attachFileBtn').onclick = openAttachFileModal;
+
+document.getElementById('sendBtn').onclick = async () => {
+  if (appState?.busy || liveTurn) {
+    try {
+      const r = await apiPost('/api/chat/abort', {});
+      showToast('Stopping agent...');
+      if (r.state && !r.state.busy) {
+        await finishLiveTurnFromServer('');
+      } else {
+        startTurnPoller();
+      }
+    } catch (err) {
+      showToast('Stop failed: ' + err.message, true);
+    }
+  } else {
+    sendMessage();
+  }
 };
 
 document.getElementById('promptInput').addEventListener('keydown', (e) => {
@@ -900,8 +1367,29 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Live SSE Event Stream
+let activeEventSource = null;
+let reconnectTimer = null;
+
 function connectEvents() {
+  if (activeEventSource) {
+    try { activeEventSource.close(); } catch (_) {}
+  }
   const es = new EventSource('/api/events');
+  activeEventSource = es;
+  es.onopen = async () => {
+    // If we reconnected after a brief drop while waiting for a turn, resync state
+    if (liveTurn || appState?.busy) {
+      try {
+        const fresh = await apiGet('/api/bootstrap');
+        if (!fresh.busy) {
+          liveTurn = null;
+          pendingApproval = null;
+          appState = fresh;
+          renderAll();
+        }
+      } catch (_) {}
+    }
+  };
   es.onmessage = (msg) => {
     try {
       const ev = JSON.parse(msg.data);
@@ -912,21 +1400,33 @@ function connectEvents() {
         liveTurn.text += ev.text;
         renderChat();
       } else if (ev.type === 'tool_call' && liveTurn) {
-        liveTurn.steps.push({ name: ev.name, args: ev.args });
+        if (ev.step) upsertLiveStep(ev.step);
+        else liveTurn.steps.push({ id: liveTurn.steps.length + 1, name: ev.name, args: ev.args, status: 'running' });
+        renderChat();
+      } else if (ev.type === 'tool_result' && liveTurn) {
+        if (ev.step) upsertLiveStep(ev.step);
         renderChat();
       } else if (ev.type === 'approval_request') {
         pendingApproval = { id: ev.id, message: ev.message };
         renderChat();
       } else if (ev.type === 'turn_done' || ev.type === 'turn_error') {
+        stopTurnPoller();
         liveTurn = null;
         pendingApproval = null;
-        if (ev.state) appState = ev.state;
-        if (ev.type === 'turn_error') alert('Agent error: ' + ev.error);
+        if (ev.state) {
+          appState = ev.state;
+          appState.busy = false;
+        }
+        if (ev.type === 'turn_error') showToast('Agent error: ' + ev.error, true);
         renderAll();
       }
     } catch (_) {}
   };
-  es.onerror = () => { setTimeout(connectEvents, 2000); };
+  es.onerror = () => {
+    try { es.close(); } catch (_) {}
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connectEvents, 1500);
+  };
 }
 
 (async function boot() {

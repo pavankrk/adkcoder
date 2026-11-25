@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from contextlib import suppress
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,14 +28,16 @@ from . import __version__
 from .config_ui import (
     _http_post_json,
     default_env_path,
+    detect_provider,
     load_global_env,
+    parse_env_file,
 )
 from .config_ui import (
     dispatch_request as dispatch_config_request,
 )
 from .diagram import analyze_structure, render_diagram_markdown
 from .harness import AgentHarness
-from .profiles import masked_profiles_summary
+from .profiles import apply_profile_to_env, load_profiles, masked_profiles_summary
 from .sbom import build_cyclonedx, build_spdx, discover_components
 from .scaffolder import STACKS, scaffold
 from .scrubber import scrub
@@ -98,6 +101,100 @@ def _iter_tree(root: Path, limit: int = 350) -> list[str]:
     return found
 
 
+def _build_step_entry(step_id: int, name: str, args: dict[str, Any] | None) -> dict[str, Any]:
+    """Build a structured, scrubbed UI step card payload for a tool call."""
+    raw = args or {}
+    file_path = scrub(
+        str(raw.get("file_path") or raw.get("path") or raw.get("dir_path") or "")
+    ).strip()
+    entry: dict[str, Any] = {
+        "id": step_id,
+        "name": name,
+        "status": "running",
+        "kind": "other",
+        "file_path": file_path,
+        "summary": name,
+        "result_preview": "",
+    }
+    if name == "write_file":
+        content = scrub(str(raw.get("content") or ""))
+        entry.update(
+            {
+                "kind": "write",
+                "summary": f"Writing {file_path}" if file_path else "Writing file",
+                "content": content[:6000],
+                "truncated": len(content) > 6000,
+                "lines_added": len(content.splitlines()) if content else 0,
+                "lines_removed": 0,
+            }
+        )
+    elif name == "apply_diff":
+        old_blk = scrub(str(raw.get("search_block") or ""))
+        new_blk = scrub(str(raw.get("replace_block") or ""))
+        entry.update(
+            {
+                "kind": "diff",
+                "summary": f"Editing {file_path}" if file_path else "Editing file",
+                "search_block": old_blk[:3000],
+                "replace_block": new_blk[:3000],
+                "lines_removed": len(old_blk.splitlines()) if old_blk else 0,
+                "lines_added": len(new_blk.splitlines()) if new_blk else 0,
+            }
+        )
+    elif name == "apply_multi_diff":
+        edits = raw.get("edits") if isinstance(raw.get("edits"), list) else []
+        old_parts = [scrub(str(e.get("search_block") or "")) for e in edits if isinstance(e, dict)]
+        new_parts = [scrub(str(e.get("replace_block") or "")) for e in edits if isinstance(e, dict)]
+        old_blk = "\n---\n".join(p for p in old_parts if p)
+        new_blk = "\n---\n".join(p for p in new_parts if p)
+        entry.update(
+            {
+                "kind": "diff",
+                "summary": (
+                    f"Editing {file_path} ({len(edits)} hunks)" if file_path else "Editing file"
+                ),
+                "search_block": old_blk[:3000],
+                "replace_block": new_blk[:3000],
+                "lines_removed": sum(len(p.splitlines()) for p in old_parts if p),
+                "lines_added": sum(len(p.splitlines()) for p in new_parts if p),
+            }
+        )
+    elif name == "delete_file":
+        entry.update(
+            {
+                "kind": "delete",
+                "summary": f"Deleting {file_path}" if file_path else "Deleting file",
+            }
+        )
+    elif name == "run_shell_command":
+        cmd = scrub(str(raw.get("command") or ""))[:300]
+        entry.update(
+            {
+                "kind": "shell",
+                "command": cmd,
+                "summary": f"Running {cmd[:72]}" if cmd else "Running command",
+            }
+        )
+    elif name == "read_file":
+        entry.update(
+            {
+                "kind": "read",
+                "summary": f"Reading {file_path}" if file_path else "Reading file",
+            }
+        )
+    elif name == "search_files":
+        q = scrub(str(raw.get("query") or ""))[:80]
+        entry.update({"kind": "search", "summary": f'Searching "{q}"' if q else "Searching files"})
+    elif name == "find_files":
+        pat = scrub(str(raw.get("pattern") or ""))[:80]
+        entry.update({"kind": "search", "summary": f'Finding "{pat}"' if pat else "Finding files"})
+    elif name == "list_dir":
+        entry.update({"kind": "read", "summary": f"Listing {file_path or '.'}"})
+    else:
+        entry["args"] = {k: scrub(str(v))[:120] for k, v in raw.items()}
+    return entry
+
+
 def load_desktop_html() -> str:
     override = os.environ.get("ADK_CODER_DESKTOP_HTML", "").strip()
     if override and Path(override).is_file():
@@ -155,8 +252,22 @@ class DesktopController:
         self._workspaces: list[str] = self._load_saved_workspaces(self._active_ws)
         self._subscribers: list[queue.Queue[dict[str, Any]]] = []
         self._busy = False
+        self._abort_requested = False
+        self._turn_seq = 0
+        self._done_turn_id = 0
+        self._turn_snapshot: dict[str, Any] = {
+            "turn_id": 0,
+            "done_turn_id": 0,
+            "status": "idle",
+            "text": "",
+            "thought": "",
+            "steps": [],
+            "error": "",
+            "pending_approval": None,
+        }
         self._active_abort: asyncio.Event | None = None
         self._active_loop: asyncio.AbstractEventLoop | None = None
+        self._active_task: asyncio.Task[Any] | None = None
         self._pending_approvals: dict[str, tuple[threading.Event, dict[str, Any]]] = {}
         self._window: Any = None  # pywebview Window reference when running natively
 
@@ -189,18 +300,19 @@ class DesktopController:
             pass
 
     def emit(self, event: dict[str, Any]) -> None:
+        critical = event.get("type") in {"turn_done", "turn_error", "approval_request", "turn_start"}
         with self._lock:
-            dead: list[queue.Queue[dict[str, Any]]] = []
-            for q in self._subscribers:
+            for q in list(self._subscribers):
                 try:
                     q.put_nowait(event)
                 except queue.Full:
-                    dead.append(q)
-            for q in dead:
-                self._subscribers.remove(q)
+                    if critical:
+                        with suppress(queue.Empty, queue.Full):
+                            q.get_nowait()
+                            q.put_nowait(event)
 
     def subscribe(self) -> queue.Queue[dict[str, Any]]:
-        q: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=400)
+        q: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=4000)
         with self._lock:
             self._subscribers.append(q)
         return q
@@ -215,17 +327,23 @@ class DesktopController:
         req_id = uuid.uuid4().hex[:10]
         ev = threading.Event()
         holder: dict[str, Any] = {"decision": False}
+        clean_msg = scrub(message)
         with self._lock:
             self._pending_approvals[req_id] = (ev, holder)
-        self.emit({"type": "approval_request", "id": req_id, "message": scrub(message)})
+            self._turn_snapshot["pending_approval"] = {"id": req_id, "message": clean_msg}
+        self.emit({"type": "approval_request", "id": req_id, "message": clean_msg})
         ev.wait(timeout=300)
         with self._lock:
             self._pending_approvals.pop(req_id, None)
+            if (self._turn_snapshot.get("pending_approval") or {}).get("id") == req_id:
+                self._turn_snapshot["pending_approval"] = None
         return holder["decision"]
 
     def resolve_approval(self, req_id: str, decision: str) -> bool:
         with self._lock:
             entry = self._pending_approvals.get(req_id)
+            if (self._turn_snapshot.get("pending_approval") or {}).get("id") == req_id:
+                self._turn_snapshot["pending_approval"] = None
         if not entry:
             return False
         ev, holder = entry
@@ -237,8 +355,106 @@ class DesktopController:
         ev.set()
         return True
 
+    def chat_status(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "busy": self._busy,
+                "turn_id": self._turn_seq,
+                "done_turn_id": self._done_turn_id,
+                "status": self._turn_snapshot.get("status", "idle"),
+                "text": self._turn_snapshot.get("text", ""),
+                "thought": self._turn_snapshot.get("thought", ""),
+                "steps": list(self._turn_snapshot.get("steps") or []),
+                "error": self._turn_snapshot.get("error", ""),
+                "pending_approval": self._turn_snapshot.get("pending_approval"),
+            }
+
+    def _clean_workspace_path(self, workspace: str | None) -> str:
+        raw = (workspace or self._active_ws or "").strip()
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
+            raw = raw[1:-1].strip()
+        if not raw:
+            raise ValueError("Workspace path cannot be empty.")
+        return str(Path(raw).expanduser().resolve())
+
+    def _sync_harness_with_global_config(self, h: AgentHarness, *, apply_mode: bool = False) -> None:
+        """Keep a workspace harness's model & endpoint in sync with active profile / global .env."""
+        env_vals = parse_env_file(self.env_path)
+        for key, val in env_vals.items():
+            if val:
+                os.environ[key] = val
+
+        store = load_profiles(self.env_path)
+        active_name = store.get("active") or ""
+        active_prof = (store.get("profiles") or {}).get(active_name) if active_name else None
+
+        target_model = ""
+        provider = ""
+        base_url = ""
+        target_mode = ""
+
+        # Prefer global .env model when present (saved by /api/save or /api/profiles/use),
+        # falling back to the active profile if .env does not specify one.
+        if active_prof and (
+            not env_vals.get("ADK_CODER_MODEL")
+            or env_vals.get("ADK_CODER_MODEL") == active_prof.get("model")
+        ):
+            apply_profile_to_env(active_prof)
+            target_model = str(active_prof.get("model") or "").strip()
+            provider = str(active_prof.get("provider") or detect_provider(target_model)).strip()
+            base_url = str(active_prof.get("base_url") or "").strip()
+            target_mode = str(active_prof.get("mode") or "").strip().lower()
+        elif env_vals.get("ADK_CODER_MODEL"):
+            target_model = env_vals["ADK_CODER_MODEL"].strip()
+            provider = detect_provider(target_model)
+            if provider == "openai-compatible":
+                base_url = (
+                    env_vals.get("OPENAI_API_BASE") or env_vals.get("OPENAI_BASE_URL") or ""
+                ).strip()
+            elif provider == "ollama":
+                base_url = (
+                    env_vals.get("OLLAMA_API_BASE") or env_vals.get("OLLAMA_HOST") or ""
+                ).strip()
+            target_mode = (env_vals.get("ADK_CODER_MODE") or "").strip().lower()
+
+        if not target_model:
+            return
+
+        changed = False
+        if h.config.get("model") != target_model:
+            h.config["model"] = target_model
+            changed = True
+
+        if provider == "openai-compatible":
+            if base_url and h.config.get("openai_api_base") != base_url:
+                h.config["openai_api_base"] = base_url
+                changed = True
+            if "ollama_api_base" in h.config:
+                h.config.pop("ollama_api_base", None)
+                changed = True
+        elif provider == "ollama":
+            if base_url and h.config.get("ollama_api_base") != base_url:
+                h.config["ollama_api_base"] = base_url
+                changed = True
+            if "openai_api_base" in h.config:
+                h.config.pop("openai_api_base", None)
+                changed = True
+        else:
+            for stale_key in ("openai_api_base", "ollama_api_base"):
+                if stale_key in h.config:
+                    h.config.pop(stale_key, None)
+                    changed = True
+
+        if apply_mode and target_mode in MODES and h.mode != target_mode:
+            h.tools.mode = target_mode
+            h.config["mode"] = target_mode
+            changed = True
+
+        if changed:
+            h.write("config.json", json.dumps(h.config, indent=2) + "\n")
+
     def get_harness(self, workspace: str | None = None) -> AgentHarness:
-        key = str(Path(workspace or self._active_ws).expanduser().resolve())
+        key = self._clean_workspace_path(workspace)
         if not Path(key).is_dir():
             raise ValueError(f"Workspace not found: {key}")
         with self._lock:
@@ -249,37 +465,91 @@ class DesktopController:
             if h is None:
                 h = AgentHarness(key, approve=self._interactive_approve)
                 self._harnesses[key] = h
-            return h
+        self._sync_harness_with_global_config(h)
+        return h
 
     def select_workspace(self, workspace: str) -> dict[str, Any]:
         h = self.get_harness(workspace)
-        self._active_ws = str(h.root)
-        return self.bootstrap_state()
+        self._sync_harness_with_global_config(h)
+        resolved = str(h.root)
+        with self._lock:
+            self._active_ws = resolved
+            self._workspaces = [resolved] + [w for w in self._workspaces if w != resolved]
+            self._save_workspaces(self._workspaces)
+        if self._window is not None and hasattr(self._window, "set_title"):
+            try:
+                self._window.set_title(f"ADK Coder — {h.root.name}")
+            except (AttributeError, RuntimeError, OSError):
+                return {"ok": True, **self.bootstrap_state()}
+        return {"ok": True, **self.bootstrap_state()}
 
     def remove_workspace(self, workspace: str) -> dict[str, Any]:
-        target = str(Path(workspace).expanduser().resolve())
+        raw = (workspace or "").strip().strip('"').strip("'")
+        target = str(Path(raw).expanduser().resolve()) if raw else ""
         with self._lock:
-            self._workspaces = [w for w in self._workspaces if w != target]
+            self._workspaces = [w for w in self._workspaces if w != target and w != raw]
             if not self._workspaces:
                 self._workspaces = [self._active_ws]
-            elif self._active_ws == target:
+            elif self._active_ws in {target, raw}:
                 self._active_ws = self._workspaces[0]
             self._save_workspaces(self._workspaces)
-        return self.bootstrap_state()
+        return {"ok": True, **self.bootstrap_state()}
+
+    def _os_folder_picker_fallback(self) -> tuple[bool, str | None, str]:
+        """Fallback native folder picker using OS scripting if pywebview dialog fails."""
+        try:
+            if sys.platform == "darwin" and shutil.which("osascript"):
+                proc = subprocess.run(
+                    [
+                        "osascript",
+                        "-e",
+                        'POSIX path of (choose folder with prompt "Select Workspace Folder")',
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    check=False,
+                )
+                if proc.returncode == 0 and proc.stdout.strip():
+                    return True, proc.stdout.strip(), ""
+                if "User canceled" in proc.stderr or "(-128)" in proc.stderr:
+                    return True, None, ""
+                return False, None, proc.stderr.strip() or "Folder picker failed."
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return False, None, str(exc)
+        return False, None, "Native folder picker unavailable."
 
     def pick_workspace_dialog(self) -> dict[str, Any]:
-        if self._window is None:
-            return {"ok": False, "error": "Native folder picker is only available inside the desktop window."}
-        try:
-            import webview
+        picked = ""
+        err_msg = ""
+        if self._window is not None:
+            try:
+                import webview
 
-            dialog_type = getattr(getattr(webview, "FileDialog", None), "FOLDER", None) or getattr(
-                webview, "FOLDER_DIALOG", 20
-            )
-            chosen = self._window.create_file_dialog(dialog_type)
-            if chosen and len(chosen) > 0:
-                return {"ok": True, "state": self.select_workspace(str(chosen[0]))}
-            return {"ok": True, "cancelled": True}
+                dialog_type = getattr(getattr(webview, "FileDialog", None), "FOLDER", None) or getattr(
+                    webview, "FOLDER_DIALOG", 20
+                )
+                chosen = self._window.create_file_dialog(dialog_type, directory=self._active_ws)
+                if chosen is None or chosen == () or chosen == []:
+                    return {"ok": True, "cancelled": True}
+                picked = chosen if isinstance(chosen, str) else str(chosen[0])
+            except Exception as exc:  # noqa: BLE001
+                err_msg = scrub(str(exc))
+
+        if not picked:
+            ok, fb_path, fb_err = self._os_folder_picker_fallback()
+            if ok:
+                if not fb_path:
+                    return {"ok": True, "cancelled": True}
+                picked = fb_path
+            else:
+                return {
+                    "ok": False,
+                    "error": err_msg or fb_err or "Native folder picker is unavailable. Enter a folder path instead.",
+                }
+
+        try:
+            return {"ok": True, "state": self.select_workspace(picked)}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": scrub(str(exc))}
 
@@ -297,13 +567,13 @@ class DesktopController:
                 sessions = wh.sessions.list_all()[:12]
                 ws_entries.append(
                     {
-                        "path": str(p),
-                        "name": p.name,
+                        "path": str(wh.root),
+                        "name": wh.root.name,
                         "branch": branch,
                         "dirty": dirty,
                         "added": added,
                         "deleted": deleted,
-                        "active": str(p) == self._active_ws,
+                        "active": str(wh.root) == self._active_ws,
                         "active_session_id": wh.active_session_id,
                         "sessions": [
                             {
@@ -358,39 +628,89 @@ class DesktopController:
         cleaned = (message or "").strip()
         if not cleaned:
             raise ValueError("Message cannot be empty.")
+        h = self.get_harness(workspace)
         with self._lock:
             if self._busy:
                 raise ValueError("Agent is currently working. Wait or click Stop.")
             self._busy = True
+            self._abort_requested = False
+            self._active_ws = str(h.root)
+            self._turn_seq += 1
+            turn_id = self._turn_seq
+            self._turn_snapshot = {
+                "turn_id": turn_id,
+                "done_turn_id": self._done_turn_id,
+                "status": "running",
+                "text": "",
+                "thought": "",
+                "steps": [],
+                "error": "",
+                "pending_approval": None,
+            }
 
-        h = self.get_harness(workspace)
-        self._active_ws = str(h.root)
         worker = threading.Thread(
             target=self._run_turn_worker,
-            args=(h, cleaned),
+            args=(h, cleaned, turn_id),
             daemon=True,
         )
         worker.start()
-        return {"ok": True, "started": True}
+        return {"ok": True, "started": True, "turn_id": turn_id}
 
     def abort_active_turn(self) -> dict[str, Any]:
         with self._lock:
+            self._abort_requested = True
             ev = self._active_abort
             loop = self._active_loop
+            task = self._active_task
+            self._turn_snapshot["pending_approval"] = None
             for _, (pe, holder) in list(self._pending_approvals.items()):
                 holder["decision"] = False
                 pe.set()
-        if ev is not None and loop is not None:
-            loop.call_soon_threadsafe(ev.set)
-        return {"ok": True}
+        if loop is not None and not loop.is_closed():
+            if ev is not None:
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(ev.set)
+            if task is not None:
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(task.cancel)
+        return {"ok": True, "busy": self._busy, "state": self.bootstrap_state()}
 
-    def _run_turn_worker(self, h: AgentHarness, message: str) -> None:
+    def _run_turn_worker(self, h: AgentHarness, message: str, turn_id: int) -> None:
         started_at = monotonic()
         edits_before = h.tools.edit_history_count()
+        history_len_before = len(h._load_history())
         steps: list[dict[str, Any]] = []
+        streamed_text_chunks: list[str] = []
+
+        def _emit_and_record(ev: dict[str, Any]) -> None:
+            etype = ev.get("type")
+            if etype == "text":
+                chunk = str(ev.get("text") or "")
+                streamed_text_chunks.append(chunk)
+                with self._lock:
+                    self._turn_snapshot["text"] = str(self._turn_snapshot.get("text") or "") + chunk
+            elif etype == "thought":
+                chunk = str(ev.get("text") or "")
+                with self._lock:
+                    self._turn_snapshot["thought"] = (
+                        str(self._turn_snapshot.get("thought") or "") + chunk
+                    )
+            self.emit(ev)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        abort_ev = asyncio.Event()
+        with self._lock:
+            self._active_loop = loop
+            self._active_abort = abort_ev
+            if self._abort_requested:
+                abort_ev.set()
+        h.abort_signal = abort_ev
+
         self.emit(
             {
                 "type": "turn_start",
+                "turn_id": turn_id,
                 "workspace": str(h.root),
                 "message": scrub(message),
                 "model": h.model,
@@ -412,81 +732,208 @@ class DesktopController:
             stream_display=None,
             fast: bool = False,
         ) -> str:
-            proxy = _DesktopStreamProxy(self.emit)
-            # Wrap workspace tools briefly? Better: record step via proxy & model_factory callbacks
+            proxy = _DesktopStreamProxy(_emit_and_record)
             return await orig_ask(
                 role,
                 prompt,
                 tools,
                 history=history,
                 attachments=attachments,
-                show_tools=False,
+                show_tools=True,
                 stream_display=proxy,
                 fast=fast,
             )
 
-        # Also listen to tool execution by wrapping WorkspaceTools methods' approval/records isn't needed;
-        # we capture tool calls cleanly via a monkey-safe wrapper on ui.render_tool_call/result during the turn.
         from . import harness as harness_mod
 
         orig_render_call = harness_mod.render_tool_call
         orig_render_res = harness_mod.render_tool_result
 
         def _tap_tool_call(name: str, args: dict | None = None) -> None:
-            entry = {"name": name, "args": {k: scrub(str(v))[:120] for k, v in (args or {}).items()}}
-            steps.append(entry)
-            self.emit({"type": "tool_call", **entry})
+            raw_args = args or {}
+            incoming_path = scrub(
+                str(raw_args.get("file_path") or raw_args.get("path") or raw_args.get("dir_path") or "")
+            ).strip()
+            # Coalesce streaming partial updates of the same running tool call into one live card
+            if (
+                steps
+                and steps[-1]["status"] == "running"
+                and steps[-1]["name"] == name
+                and (
+                    not incoming_path
+                    or not steps[-1].get("file_path")
+                    or steps[-1].get("file_path") == incoming_path
+                )
+            ):
+                entry = _build_step_entry(steps[-1]["id"], name, raw_args)
+                steps[-1] = entry
+            else:
+                entry = _build_step_entry(len(steps) + 1, name, raw_args)
+                steps.append(entry)
+            with self._lock:
+                self._turn_snapshot["steps"] = [dict(s) for s in steps]
+            self.emit({"type": "tool_call", "turn_id": turn_id, "step": entry})
 
         def _tap_tool_res(name: str, preview: str = "") -> None:
-            self.emit({"type": "tool_result", "name": name, "preview": scrub(preview)[:180]})
+            clean_prev = scrub(preview)[:400]
+            updated_step: dict[str, Any] | None = None
+            for step in reversed(steps):
+                if step["name"] == name and step["status"] == "running":
+                    step["status"] = (
+                        "error" if clean_prev.lower().startswith(("error", "denied", "blocked")) else "done"
+                    )
+                    step["result_preview"] = clean_prev
+                    updated_step = dict(step)
+                    break
+            with self._lock:
+                self._turn_snapshot["steps"] = [dict(s) for s in steps]
+            self.emit(
+                {
+                    "type": "tool_result",
+                    "turn_id": turn_id,
+                    "name": name,
+                    "preview": clean_prev,
+                    "step": updated_step,
+                }
+            )
 
-        loop = asyncio.new_event_loop()
-        abort_ev = asyncio.Event()
-        with self._lock:
-            self._active_loop = loop
-            self._active_abort = abort_ev
-        h.abort_signal = abort_ev
+        outcome_event: dict[str, Any] | None = None
+        turn_status = "done"
+        turn_error = ""
+        saved_reply = ""
+
+        async def _run_execute() -> str:
+            if self._abort_requested or abort_ev.is_set():
+                raise asyncio.CancelledError
+            task = asyncio.create_task(h.execute(message))
+            with self._lock:
+                self._active_task = task
+                already_aborted = self._abort_requested
+            if already_aborted or abort_ev.is_set():
+                task.cancel()
+            return await task
 
         try:
             h.ask = _instrumented_ask  # type: ignore[method-assign]
             harness_mod.render_tool_call = _tap_tool_call
             harness_mod.render_tool_result = _tap_tool_res
             with console.capture() as captured:
-                result = loop.run_until_complete(h.execute(message))
+                result = loop.run_until_complete(_run_execute())
             captured_txt = captured.get().strip()
-            final_text = (result or "").strip() or captured_txt or "Done."
+            final_text = (result or "").strip() or captured_txt or "".join(streamed_text_chunks).strip() or "Done."
+            saved_reply = scrub(final_text)
             edits_delta = max(0, h.tools.edit_history_count() - edits_before)
             elapsed = round(monotonic() - started_at, 1)
-            self.emit(
-                {
-                    "type": "turn_done",
-                    "text": scrub(final_text),
-                    "elapsed_s": elapsed,
-                    "steps_count": len(steps),
-                    "steps": steps,
-                    "edits_delta": edits_delta,
-                    "model": h.model,
-                    "state": self.bootstrap_state(),
-                }
-            )
+            outcome_event = {
+                "type": "turn_done",
+                "turn_id": turn_id,
+                "text": saved_reply,
+                "elapsed_s": elapsed,
+                "steps_count": len(steps),
+                "steps": steps,
+                "edits_delta": edits_delta,
+                "model": h.model,
+            }
+        except asyncio.CancelledError:
+            turn_status = "aborted"
+            partial = "".join(streamed_text_chunks).strip()
+            saved_reply = scrub(f"{partial}\n\n*(Stopped by user)*" if partial else "*(Stopped by user)*")
+            outcome_event = {
+                "type": "turn_done",
+                "turn_id": turn_id,
+                "text": saved_reply,
+                "elapsed_s": round(monotonic() - started_at, 1),
+                "steps_count": len(steps),
+                "steps": steps,
+                "edits_delta": max(0, h.tools.edit_history_count() - edits_before),
+                "model": h.model,
+                "aborted": True,
+            }
         except Exception as exc:  # noqa: BLE001
-            self.emit(
-                {
-                    "type": "turn_error",
-                    "error": scrub(str(exc)) or type(exc).__name__,
-                    "state": self.bootstrap_state(),
-                }
-            )
+            turn_status = "error"
+            turn_error = scrub(str(exc)) or type(exc).__name__
+            saved_reply = f"**Error:** {turn_error}"
+            outcome_event = {
+                "type": "turn_error",
+                "turn_id": turn_id,
+                "error": turn_error,
+            }
         finally:
             h.ask = orig_ask  # type: ignore[method-assign]
             harness_mod.render_tool_call = orig_render_call
             harness_mod.render_tool_result = orig_render_res
             h.abort_signal = None
+            # Mark any leftover running steps as done and persist compact step cards on the model turn
+            elapsed_total = round(monotonic() - started_at, 1)
+            for s in steps:
+                if s.get("status") == "running":
+                    s["status"] = "done" if turn_status == "done" else turn_status
+            saved_steps = [
+                {
+                    k: v
+                    for k, v in s.items()
+                    if k
+                    in {
+                        "id",
+                        "name",
+                        "status",
+                        "kind",
+                        "file_path",
+                        "summary",
+                        "content",
+                        "truncated",
+                        "search_block",
+                        "replace_block",
+                        "command",
+                        "lines_added",
+                        "lines_removed",
+                        "result_preview",
+                    }
+                }
+                for s in steps[-25:]
+            ]
+            # Ensure slash commands, stopped partial turns, errors, and step cards remain in session history
+            try:
+                cur_history = h._load_history()
+                if len(cur_history) <= history_len_before and saved_reply:
+                    cur_history.append({"role": "user", "text": scrub(message)})
+                    cur_history.append(
+                        {
+                            "role": "model",
+                            "text": saved_reply,
+                            "steps": saved_steps,
+                            "elapsed_s": elapsed_total,
+                        }
+                    )
+                    h._save_history(cur_history)
+                elif saved_steps and cur_history and cur_history[-1].get("role") == "model":
+                    cur_history[-1]["steps"] = saved_steps
+                    cur_history[-1]["elapsed_s"] = elapsed_total
+                    h._save_history(cur_history)
+            except OSError:
+                pass
             with self._lock:
                 self._busy = False
+                self._abort_requested = False
+                self._done_turn_id = turn_id
                 self._active_loop = None
                 self._active_abort = None
+                self._active_task = None
+                self._turn_snapshot.update(
+                    {
+                        "turn_id": turn_id,
+                        "done_turn_id": turn_id,
+                        "status": turn_status,
+                        "text": saved_reply or self._turn_snapshot.get("text", ""),
+                        "error": turn_error,
+                        "pending_approval": None,
+                    }
+                )
             loop.close()
+
+        if outcome_event is not None:
+            outcome_event["state"] = self.bootstrap_state()
+            self.emit(outcome_event)
 
 
 def dispatch_desktop_request(
@@ -509,7 +956,8 @@ def dispatch_desktop_request(
 
         def _on_cfg_save(_data: Any) -> None:
             for h in list(ctrl._harnesses.values()):
-                h.reload_config()
+                h.reload_config(ctrl.env_path)
+                ctrl._sync_harness_with_global_config(h, apply_mode=True)
 
         return dispatch_config_request(
             method,
@@ -527,6 +975,8 @@ def dispatch_desktop_request(
         try:
             if path == "/api/bootstrap":
                 return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(ctrl.bootstrap_state()).encode("utf8")
+            if path == "/api/chat/status":
+                return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(ctrl.chat_status()).encode("utf8")
             if path == "/api/files":
                 h = ctrl.get_harness(ws_param or None)
                 return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps({"files": _iter_tree(h.root)}).encode("utf8")
@@ -689,8 +1139,8 @@ def create_desktop_server(ctrl: DesktopController, host: str = "127.0.0.1", port
             if urlparse(self.path).path == "/api/events":
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "keep-alive")
+                self.send_header("Cache-Control", "no-cache, no-transform")
+                self.send_header("X-Accel-Buffering", "no")
                 self.end_headers()
                 q = ctrl.subscribe()
                 try:
@@ -738,6 +1188,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--debug", action="store_true", help="Enable WebView DevTools inspector.")
     args = parser.parse_args(argv)
 
+    os.environ["ADK_CODER_DESKTOP"] = "1"
     env_path = (args.env or default_env_path()).expanduser().resolve()
     load_global_env(env_path)
     workspace = args.workspace.expanduser().resolve()

@@ -216,11 +216,16 @@ async def run_agent(
                 if p_tok or o_tok:
                     on_usage(int(p_tok), int(o_tok))
 
+            is_partial = bool(getattr(event, "partial", False))
+
             if on_tool_call is not None and hasattr(event, "get_function_calls"):
                 for call in event.get_function_calls() or []:
+                    call_args = dict(getattr(call, "args", None) or {})
+                    if is_partial and not call_args:
+                        continue
                     on_tool_call(
                         getattr(call, "name", "tool"),
-                        dict(getattr(call, "args", None) or {}),
+                        call_args,
                     )
 
             if on_tool_result is not None and hasattr(event, "get_function_responses"):
@@ -233,7 +238,6 @@ async def run_agent(
                     )
                     on_tool_result(getattr(resp, "name", "tool"), str(preview))
 
-            is_partial = bool(getattr(event, "partial", False))
             if is_partial and event.content:
                 for part in event.content.parts or []:
                     chunk = getattr(part, "text", None)

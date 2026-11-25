@@ -14,6 +14,9 @@ from .ui import pause_live, register_live, unregister_live
 
 @contextmanager
 def spinning(label: str):
+    if os.environ.get("ADK_CODER_DESKTOP") == "1":
+        yield
+        return
     is_tty = sys.stderr.isatty() or sys.stdout.isatty()
     is_dumb = os.environ.get("TERM", "").lower() == "dumb"
     if not is_tty or is_dumb:
