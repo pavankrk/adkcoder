@@ -736,6 +736,8 @@ class DesktopController:
                 base_url = (
                     env_vals.get("OPENAI_API_BASE") or env_vals.get("OPENAI_BASE_URL") or ""
                 ).strip()
+            elif provider == "azure":
+                base_url = (env_vals.get("AZURE_API_BASE") or "").strip()
             elif provider == "ollama":
                 base_url = (
                     env_vals.get("OLLAMA_API_BASE") or env_vals.get("OLLAMA_HOST") or ""
@@ -754,18 +756,35 @@ class DesktopController:
             if base_url and h.config.get("openai_api_base") != base_url:
                 h.config["openai_api_base"] = base_url
                 changed = True
-            if "ollama_api_base" in h.config:
-                h.config.pop("ollama_api_base", None)
+            for stale_key in ("ollama_api_base", "azure_api_base", "azure_api_version"):
+                if stale_key in h.config:
+                    h.config.pop(stale_key, None)
+                    changed = True
+        elif provider == "azure":
+            if base_url and h.config.get("azure_api_base") != base_url:
+                h.config["azure_api_base"] = base_url
                 changed = True
+            az_ver = (
+                str((active_prof or {}).get("api_version") or "").strip()
+                or env_vals.get("AZURE_API_VERSION", "").strip()
+            )
+            if az_ver and h.config.get("azure_api_version") != az_ver:
+                h.config["azure_api_version"] = az_ver
+                changed = True
+            for stale_key in ("openai_api_base", "ollama_api_base"):
+                if stale_key in h.config:
+                    h.config.pop(stale_key, None)
+                    changed = True
         elif provider == "ollama":
             if base_url and h.config.get("ollama_api_base") != base_url:
                 h.config["ollama_api_base"] = base_url
                 changed = True
-            if "openai_api_base" in h.config:
-                h.config.pop("openai_api_base", None)
-                changed = True
+            for stale_key in ("openai_api_base", "azure_api_base", "azure_api_version"):
+                if stale_key in h.config:
+                    h.config.pop(stale_key, None)
+                    changed = True
         else:
-            for stale_key in ("openai_api_base", "ollama_api_base"):
+            for stale_key in ("openai_api_base", "ollama_api_base", "azure_api_base", "azure_api_version"):
                 if stale_key in h.config:
                     h.config.pop(stale_key, None)
                     changed = True

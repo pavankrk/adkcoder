@@ -94,6 +94,7 @@ def save_profile(
         "base_url": str(entry.get("base_url") or "").strip(),
         "api_key": str(entry.get("api_key") or "").strip(),
         "api_token": str(entry.get("api_token") or "").strip(),
+        "api_version": str(entry.get("api_version") or "").strip(),
         "mode": mode,
         "max_tokens": int(entry["max_tokens"])
         if str(entry.get("max_tokens", "")).isdecimal() and int(entry["max_tokens"]) >= 256
@@ -155,6 +156,17 @@ def apply_profile_to_env(profile: dict[str, Any]) -> None:
             os.environ["OPENAI_API_BASE"] = base_url
             os.environ["OPENAI_BASE_URL"] = base_url
         os.environ["OPENAI_API_KEY"] = api_key or "local"
+        if api_token:
+            os.environ["ADK_CODER_ENDPOINT_API_KEY"] = api_token
+        else:
+            os.environ.pop("ADK_CODER_ENDPOINT_API_KEY", None)
+    elif provider == "azure":
+        if base_url:
+            os.environ["AZURE_API_BASE"] = base_url
+        if api_key:
+            os.environ["AZURE_API_KEY"] = api_key
+        api_ver = str(profile.get("api_version") or "").strip() or "2024-12-01-preview"
+        os.environ["AZURE_API_VERSION"] = api_ver
         if api_token:
             os.environ["ADK_CODER_ENDPOINT_API_KEY"] = api_token
         else:
@@ -264,6 +276,7 @@ def masked_profiles_summary(env_path: Path | None = None) -> dict[str, Any]:
             "provider": prof.get("provider", "openai-compatible"),
             "model": prof.get("model", ""),
             "base_url": prof.get("base_url", ""),
+            "api_version": prof.get("api_version", ""),
             "mode": prof.get("mode", "ask"),
             "max_tokens": prof.get("max_tokens", 8192),
             "context_window": prof.get("context_window", ""),

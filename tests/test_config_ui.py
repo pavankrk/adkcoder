@@ -209,3 +209,188 @@ def test_full_auto_mode_persists_globally_and_auto_approves(tmp_path, monkeypatc
     assert h.mode == "full-auto"
     assert h.approve("Write debug report?") is True
     assert prompted is False
+
+
+def test_azure_openai_uses_max_completion_tokens_and_auto_retries(monkeypatch):
+    import asyncio
+
+    from adk_coder import model_factory
+
+    seen_calls: list[tuple[str, dict, dict]] = []
+
+    def azure_poster(url, payload, headers, timeout):
+        seen_calls.append((url, dict(payload), dict(headers)))
+        return 200, {"choices": [{"message": {"content": "OK"}}]}
+
+    res = check_connectivity(
+        provider="openai-compatible",
+        model="gpt-5",
+        base_url="https://demo.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview",
+        api_key="az-key-123",
+        poster=azure_poster,
+    )
+    assert res["ok"] is True
+    url, body, hdrs = seen_calls[-1]
+    assert url == "https://demo.openai.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2024-12-01-preview"
+    assert "max_completion_tokens" in body and "max_tokens" not in body
+    assert hdrs.get("api-key") == "az-key-123"
+
+    # Custom corporate Azure proxy (non-.azure.com host + custom deployment name) auto-retries on 400
+    proxy_calls: list[dict] = []
+
+    def proxy_poster(url, payload, headers, timeout):
+        proxy_calls.append(dict(payload))
+        if "max_tokens" in payload:
+            return 400, {
+                "error": {
+                    "message": "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
+                }
+            }
+        return 200, {"choices": [{"message": {"content": "OK"}}]}
+
+    res2 = check_connectivity(
+        provider="openai-compatible",
+        model="corp-model",
+        base_url="https://ai-gateway.corp.internal/v1",
+        api_key="corp-token",
+        poster=proxy_poster,
+    )
+    assert res2["ok"] is True
+    assert len(proxy_calls) == 2
+    assert "max_tokens" in proxy_calls[0]
+    assert "max_completion_tokens" in proxy_calls[1] and "max_tokens" not in proxy_calls[1]
+
+    # Live model_factory.resolve_model sets max_completion_tokens + drop_params for Azure/o-series
+    m = model_factory.resolve_model(
+        "openai/gpt-5",
+        api_base="https://demo.openai.azure.com/openai/v1",
+        max_tokens=4096,
+    )
+    assert m._additional_args.get("max_completion_tokens") == 4096
+    assert "max_tokens" not in m._additional_args
+    assert m._additional_args.get("drop_params") is True
+
+    # Live model_factory.generate auto-retries & caches on custom gateway max_tokens error
+    model_factory._NEEDS_MAX_COMPLETION_TOKENS.clear()
+    attempts: list[dict] = []
+
+    async def fake_run_agent(agent, prompt, **kwargs):
+        args = dict(agent.model._additional_args)
+        attempts.append(args)
+        if "max_tokens" in args:
+            raise RuntimeError(
+                "Unsupported parameter: 'max_tokens' is not supported. Use 'max_completion_tokens' instead."
+            )
+        return "azure-ok"
+
+    monkeypatch.setattr(model_factory, "run_agent", fake_run_agent)
+    out = asyncio.run(
+        model_factory.generate(
+            "openai/custom-azure-deploy",
+            "sys",
+            "hello",
+            api_base="https://ai-gateway.corp.internal/v1",
+            max_tokens=2048,
+        )
+    )
+    assert out == "azure-ok"
+    assert len(attempts) == 2
+    assert "max_tokens" in attempts[0]
+    assert attempts[1].get("max_completion_tokens") == 2048 and "max_tokens" not in attempts[1]
+
+
+def test_first_class_azure_provider_save_load_connectivity_and_profiles(tmp_path, monkeypatch):
+    from adk_coder import config_ui, model_factory
+    from adk_coder.profiles import activate_profile, save_profile
+
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    env_file = tmp_path / ".env"
+    ws = tmp_path / "azure_ws"
+    ws.mkdir()
+
+    saved = save_ui_state(
+        env_file,
+        {
+            "provider": "azure",
+            "model": "gpt-4o-deploy",
+            "base_url": "https://my-corp.openai.azure.com",
+            "api_key": "az-secret-key",
+            "api_version": "2024-12-01-preview",
+            "workspace": str(ws),
+            "mode": "auto-edit",
+        },
+    )
+    assert saved["ok"] is True and saved["model"] == "azure/gpt-4o-deploy"
+    env_vals = parse_env_file(env_file)
+    assert env_vals["AZURE_API_BASE"] == "https://my-corp.openai.azure.com"
+    assert env_vals["AZURE_API_KEY"] == "az-secret-key"
+    assert env_vals["AZURE_API_VERSION"] == "2024-12-01-preview"
+
+    loaded = config_ui.load_ui_state(env_file, ws)
+    assert loaded["provider"] == "azure"
+    assert loaded["model"] == "azure/gpt-4o-deploy"
+    assert loaded["base_url"] == "https://my-corp.openai.azure.com"
+    assert loaded["api_version"] == "2024-12-01-preview"
+
+    # Dedicated provider="azure" check_connectivity builds deployment URL + api-version + api-key + max_completion_tokens
+    calls: list[tuple[str, dict, dict]] = []
+
+    def fake_post(url, payload, headers, timeout):
+        calls.append((url, dict(payload), dict(headers)))
+        return 200, {"choices": [{"message": {"content": "OK"}}]}
+
+    chk = check_connectivity(
+        provider="azure",
+        model="gpt-4o-deploy",
+        base_url="https://my-corp.openai.azure.com",
+        api_key="az-secret-key",
+        api_version="2024-12-01-preview",
+        poster=fake_post,
+    )
+    assert chk["ok"] is True
+    assert calls[0][0] == "https://my-corp.openai.azure.com/openai/deployments/gpt-4o-deploy/chat/completions?api-version=2024-12-01-preview"
+    assert calls[0][1].get("max_completion_tokens") == 16 and "max_tokens" not in calls[0][1]
+    assert calls[0][2].get("api-key") == "az-secret-key"
+
+    # Profile save & activate sets AZURE_* env vars and resolves LiteLlm with api_version
+    save_profile(
+        "CorpAzure",
+        {
+            "provider": "azure",
+            "model": "gpt-4o-deploy",
+            "base_url": "https://my-corp.openai.azure.com",
+            "api_key": "az-secret-key",
+            "api_version": "2024-12-01-preview",
+        },
+        env_path=env_file,
+    )
+    activate_profile("CorpAzure", env_path=env_file, workspace=ws)
+    assert os.environ["AZURE_API_BASE"] == "https://my-corp.openai.azure.com"
+    assert os.environ["AZURE_API_VERSION"] == "2024-12-01-preview"
+
+    litellm_model = model_factory.resolve_model("azure/gpt-4o-deploy", max_tokens=4096)
+    assert litellm_model._additional_args.get("api_version") == "2024-12-01-preview"
+    assert litellm_model._additional_args.get("max_completion_tokens") == 4096
+    assert "max_tokens" not in litellm_model._additional_args
+    assert 'data-p="azure"' in config_ui.HTML_PAGE
+
+    # Full pasted deployment URL (with ?api-version=...) must be normalized to clean resource root so LiteLLM doesn't 404!
+    full_dep = model_factory.resolve_model(
+        "azure/wrong-name",
+        api_base="https://my-corp.openai.azure.com/openai/deployments/real-deploy/chat/completions?api-version=2025-01-01-preview",
+        max_tokens=2048,
+    )
+    assert full_dep.model == "azure/real-deploy"
+    assert full_dep._additional_args.get("api_base") == "https://my-corp.openai.azure.com"
+    assert full_dep._additional_args.get("api_version") == "2025-01-01-preview"
+
+    # Azure OpenAI v1 endpoint (/openai/v1) routes via openai/<deployment> with api-key header so LiteLLM doesn't append /openai/deployments/
+    v1_model = model_factory.resolve_model(
+        "azure/gpt-5",
+        api_base="https://my-corp.openai.azure.com/openai/v1",
+        max_tokens=2048,
+    )
+    assert v1_model.model == "openai/gpt-5"
+    assert v1_model._additional_args.get("api_base") == "https://my-corp.openai.azure.com/openai/v1"
+    assert "api_version" not in v1_model._additional_args
+    assert v1_model._additional_args.get("max_completion_tokens") == 2048

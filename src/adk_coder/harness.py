@@ -119,6 +119,8 @@ CONFIG_KEYS = {
     "notifications",
     "test_command",
     "openai_api_base",
+    "azure_api_base",
+    "azure_api_version",
     "ollama_api_base",
     "context_window",
     "max_tokens",
@@ -416,7 +418,19 @@ class AgentHarness:
             self.config.get("fast_model") if fast and self.config.get("fast_model") else self.model
         )
         options: dict = {}
-        if active_model.startswith("openai/"):
+        if active_model.startswith("azure/"):
+            api_base = (
+                self.config.get("azure_api_base")
+                or os.environ.get("AZURE_API_BASE")
+                or self.config.get("openai_api_base")
+                or os.environ.get("OPENAI_API_BASE")
+            )
+            if api_base:
+                options["api_base"] = api_base
+            api_ver = self.config.get("azure_api_version") or os.environ.get("AZURE_API_VERSION")
+            if api_ver:
+                options["api_version"] = api_ver
+        elif active_model.startswith("openai/"):
             api_base = (
                 self.config.get("openai_api_base")
                 or os.environ.get("OPENAI_API_BASE")

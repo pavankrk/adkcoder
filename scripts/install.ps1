@@ -71,31 +71,41 @@ $installSpec = $null
 if ($Wheel) {
     $resolved = (Resolve-Path $Wheel).Path
     $uri = ([System.Uri]$resolved).AbsoluteUri
-    $installSpec = "adk-coder[local] @ $uri"
+    $installSpec = "adk-coder[local,desktop] @ $uri"
 } elseif (Test-Path $offlineWheels) {
-    $installSpec = "adk-coder[local]"
+    $installSpec = "adk-coder[local,desktop]"
 } else {
-    $distWhl = Get-ChildItem -Path (Join-Path $repoRoot "dist") -Filter "adk_coder-*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $distWhl = Get-ChildItem -Path $scriptRoot -Filter "adk_coder-*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $distWhl) {
+        $distWhl = Get-ChildItem -Path (Join-Path $repoRoot "dist") -Filter "adk_coder-*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
     if ($distWhl) {
         $uri = ([System.Uri]$distWhl.FullName).AbsoluteUri
-        $installSpec = "adk-coder[local] @ $uri"
+        $installSpec = "adk-coder[local,desktop] @ $uri"
     } elseif (Test-Path (Join-Path $repoRoot "pyproject.toml")) {
-        $installSpec = "$repoRoot[local]"
+        $installSpec = "$repoRoot[local,desktop]"
     } else {
-        $installSpec = "adk-coder[local]"
+        $installSpec = "adk-coder[local,desktop]"
     }
 }
 
-Write-Host "==> Installing adk-coder into $venvDir" -ForegroundColor Cyan
+$alreadyInstalled = Test-Path (Join-Path $scriptsDir "python.exe")
+if ($alreadyInstalled) {
+    Write-Host "==> Updating existing adk-coder installation in $venvDir" -ForegroundColor Cyan
+} else {
+    Write-Host "==> Installing adk-coder into $venvDir" -ForegroundColor Cyan
+}
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 $uv = Find-Uv
 if ($uv -and -not (Test-Path $offlineWheels)) {
     Write-Host "    Using uv: $uv"
-    & $uv venv $venvDir --python ">=3.11"
-    if ($LASTEXITCODE -ne 0) { throw "uv venv failed." }
+    if (-not $alreadyInstalled) {
+        & $uv venv $venvDir --python ">=3.11"
+        if ($LASTEXITCODE -ne 0) { throw "uv venv failed." }
+    }
     $venvPy = Join-Path $scriptsDir "python.exe"
-    & $uv pip install --python $venvPy $installSpec
+    & $uv pip install --python $venvPy --reinstall-package adk-coder $installSpec
     if ($LASTEXITCODE -ne 0) { throw "uv pip install failed." }
 } else {
     $py = Find-Python311Plus
@@ -103,13 +113,16 @@ if ($uv -and -not (Test-Path $offlineWheels)) {
         throw "Python 3.11+ or uv is required. Install uv (`irm https://astral.sh/uv/install.ps1 | iex`) or Python 3.11+ (`winget install Python.Python.3.13`) and retry."
     }
     Write-Host "    Using Python: $($py.Cmd) $($py.Prefix -join ' ')"
-    & $py.Cmd @($py.Prefix + @("-m", "venv", $venvDir))
-    if ($LASTEXITCODE -ne 0) { throw "python -m venv failed." }
+    if (-not $alreadyInstalled) {
+        & $py.Cmd @($py.Prefix + @("-m", "venv", $venvDir))
+        if ($LASTEXITCODE -ne 0) { throw "python -m venv failed." }
+    }
     $pip = Join-Path $scriptsDir "pip.exe"
     if (Test-Path $offlineWheels) {
-        & $pip install --no-index --find-links $offlineWheels $installSpec
+        & $pip install --no-index --find-links $offlineWheels --upgrade --force-reinstall --no-deps $installSpec
     } else {
-        & $pip install --upgrade $installSpec
+        & $pip install --upgrade --force-reinstall --no-deps $installSpec
+        & $pip install $installSpec
     }
     if ($LASTEXITCODE -ne 0) { throw "pip install failed." }
 }
@@ -129,7 +142,8 @@ if (($env:Path -split ";") -notcontains $scriptsDir) {
 }
 
 Write-Host ""
-Write-Host "Installed adk-coder and adk-coder-config!" -ForegroundColor Green
+Write-Host "Installed/Updated adk-coder, adk-coder-app, and adk-coder-config!" -ForegroundColor Green
+Write-Host "  Desktop IDE:   adk-coder-app   (or: adk-coder --app)"
 Write-Host "  Configure UI:  adk-coder --config"
 Write-Host "  Launch CLI:    adk-coder"
 Write-Host ""

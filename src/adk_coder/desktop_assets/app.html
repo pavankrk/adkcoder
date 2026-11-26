@@ -2007,15 +2007,16 @@ async function openCustomizationsModal(activeTab = 'provider') {
     </div>
     <div class="form-grid">
       <div class="field"><label>Provider</label>
-        <select id="cProv">${['openai-compatible','ollama','gemini','anthropic','openrouter','groq'].map(p => `<option ${p===st.provider?'selected':''}>${p}</option>`).join('')}</select>
+        <select id="cProv">${['openai-compatible','azure','ollama','gemini','anthropic','openrouter','groq'].map(p => `<option ${p===st.provider?'selected':''}>${p}</option>`).join('')}</select>
       </div>
       <div class="field"><label>Execution Mode</label>
         <select id="cMode">${['ask','auto-edit','plan','full-auto'].map(m => `<option ${m===st.mode?'selected':''}>${m}</option>`).join('')}</select>
       </div>
-      <div class="field full"><label>Base URL</label><input id="cBase" value="${esc(st.base_url || '')}" /></div>
-      <div class="field full"><label>Model ID</label><input id="cModel" value="${esc(st.model || '')}" /></div>
+      <div class="field full"><label>Base URL</label><input id="cBase" value="${esc(st.base_url || '')}" placeholder="https://<resource>.openai.azure.com or https://.../v1" /></div>
+      <div class="field full"><label>Model / Deployment ID</label><input id="cModel" value="${esc(st.model || '')}" /></div>
       <div class="field"><label>API Key</label><input id="cKey" type="password" value="${esc(st.api_key || '')}" /></div>
       <div class="field"><label>Endpoint Token (optional)</label><input id="cTok" type="password" value="${esc(st.api_token || '')}" /></div>
+      <div class="field full" id="cAzVerRow" style="${st.provider === 'azure' ? '' : 'display:none;'}"><label>Azure API Version</label><input id="cAzVer" value="${esc(st.api_version || '2024-12-01-preview')}" placeholder="2024-12-01-preview" /></div>
       <div class="field full"><label>Test Command</label><input id="cTest" value="${esc(st.test_command || '')}" placeholder="pytest -q or mvn -B test" /></div>
     </div>
     <div style="display:flex;gap:8px;margin-top:12px;">
@@ -2040,6 +2041,10 @@ async function openCustomizationsModal(activeTab = 'provider') {
 
   body.querySelectorAll('[data-ctab]').forEach(b => { b.onclick = () => openCustomizationsModal(b.dataset.ctab); });
   document.getElementById('cSwitchWsBtn').onclick = () => openWorkspaceModal();
+  document.getElementById('cProv').onchange = (e) => {
+    const row = document.getElementById('cAzVerRow');
+    if (row) row.style.display = e.target.value === 'azure' ? '' : 'none';
+  };
   const getForm = () => ({
     provider: document.getElementById('cProv').value,
     mode: document.getElementById('cMode').value,
@@ -2047,6 +2052,7 @@ async function openCustomizationsModal(activeTab = 'provider') {
     model: document.getElementById('cModel').value.trim(),
     api_key: document.getElementById('cKey').value.trim(),
     api_token: document.getElementById('cTok').value.trim(),
+    api_version: (document.getElementById('cAzVer')?.value || '').trim(),
     test_command: document.getElementById('cTest').value.trim(),
     workspace: appState.workspace,
     sync_workspace: true,

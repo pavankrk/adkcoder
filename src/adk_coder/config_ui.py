@@ -27,6 +27,9 @@ ENV_KEYS = (
     "OPENAI_API_BASE",
     "OPENAI_BASE_URL",
     "OPENAI_API_KEY",
+    "AZURE_API_BASE",
+    "AZURE_API_KEY",
+    "AZURE_API_VERSION",
     "ADK_CODER_ENDPOINT_API_KEY",
     "OLLAMA_HOST",
     "OLLAMA_API_BASE",
@@ -39,12 +42,14 @@ ENV_KEYS = (
 
 PROVIDERS = (
     "openai-compatible",
+    "azure",
     "ollama",
     "gemini",
     "anthropic",
     "openrouter",
     "groq",
 )
+DEFAULT_AZURE_API_VERSION = "2024-12-01-preview"
 
 
 def default_env_path() -> Path:
@@ -131,6 +136,8 @@ def write_env_file(path: Path, updates: dict[str, str]) -> Path:
 
 def detect_provider(model: str) -> str:
     lowered = (model or "").lower()
+    if lowered.startswith("azure/"):
+        return "azure"
     if lowered.startswith(("ollama/", "ollama_chat/")):
         return "ollama"
     if lowered.startswith("gemini-"):
@@ -161,9 +168,13 @@ def format_model_id(provider: str, raw_model: str) -> str:
 
 
 def _normalize_http_url(raw: str) -> str:
-    cleaned = (raw or "").strip().rstrip("/")
+    cleaned = (raw or "").strip()
     if not cleaned:
         return ""
+    query = ""
+    if "?" in cleaned:
+        cleaned, query = cleaned.split("?", 1)
+    cleaned = cleaned.rstrip("/")
     if cleaned.startswith("http:") and not cleaned.startswith("http://"):
         cleaned = "http://" + cleaned[len("http:") :].lstrip("/")
     elif cleaned.startswith("https:") and not cleaned.startswith("https://"):
@@ -175,7 +186,14 @@ def _normalize_http_url(raw: str) -> str:
         if cleaned.endswith(suffix):
             cleaned = cleaned[: -len(suffix)].rstrip("/")
             break
-    return cleaned
+    return f"{cleaned}?{query}" if query else cleaned
+
+
+def _build_chat_completions_url(root: str) -> str:
+    if "?" in root:
+        base, query = root.split("?", 1)
+        return f"{base.rstrip('/')}/chat/completions?{query}"
+    return f"{root.rstrip('/')}/chat/completions"
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -223,6 +241,7 @@ def check_connectivity(
     base_url: str = "",
     api_key: str = "",
     api_token: str = "",
+    api_version: str = "",
     poster=_http_post_json,
 ) -> dict[str, Any]:
     """Run a live model connectivity + authentication check and return structured diagnostics."""
@@ -238,20 +257,34 @@ def check_connectivity(
 
     try:
         if provider == "openai-compatible":
+            from .model_factory import is_azure_endpoint, uses_max_completion_tokens
+
             root = _normalize_http_url(base_url) or "https://api.openai.com/v1"
-            url = f"{root}/chat/completions"
+            url = _build_chat_completions_url(root)
             bare_model = full_model.removeprefix("openai/")
             token = api_token or api_key or "local"
-            status, data = poster(
-                url,
-                {
-                    "model": bare_model,
-                    "messages": [{"role": "user", "content": "Reply with OK"}],
-                    "max_tokens": 16,
-                },
-                {"Authorization": f"Bearer {token}"},
-                60.0,
-            )
+            headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+            if is_azure_endpoint(root) and token and token != "local":
+                headers["api-key"] = token
+            use_mct = uses_max_completion_tokens(full_model, root)
+            req_body: dict[str, Any] = {
+                "model": bare_model,
+                "messages": [{"role": "user", "content": "Reply with OK"}],
+                ("max_completion_tokens" if use_mct else "max_tokens"): 16,
+            }
+            status, data = poster(url, req_body, headers, 60.0)
+            # Auto-retry seamlessly if endpoint rejects max_tokens (Azure / gpt-5 / o-series)
+            # or rejects max_completion_tokens (older OpenAI-compatible servers).
+            if status == 400:
+                err_txt = (json.dumps(data) if isinstance(data, dict) else str(data)).lower()
+                if "max_completion_tokens" in err_txt and "max_tokens" in req_body:
+                    req_body.pop("max_tokens", None)
+                    req_body["max_completion_tokens"] = 16
+                    status, data = poster(url, req_body, headers, 60.0)
+                elif "max_completion_tokens" in err_txt and "max_completion_tokens" in req_body:
+                    req_body.pop("max_completion_tokens", None)
+                    req_body["max_tokens"] = 16
+                    status, data = poster(url, req_body, headers, 60.0)
             ms = int((time.monotonic() - start) * 1000)
             if 200 <= status < 300 and isinstance(data, dict):
                 choices = data.get("choices") or []
@@ -267,6 +300,66 @@ def check_connectivity(
                     "model": full_model,
                     "reply": scrub(reply[:120] or "OK"),
                     "message": f"Connected to {root} ({ms} ms).",
+                }
+            return _error_result(status, data, url, ms)
+
+        if provider == "azure":
+            root = _normalize_http_url(base_url)
+            if not root:
+                return {
+                    "ok": False,
+                    "latency_ms": 0,
+                    "message": "Azure OpenAI Base URL is required.",
+                    "hint": "Example: https://<resource>.openai.azure.com",
+                }
+            deployment = full_model.removeprefix("azure/")
+            token = api_key or api_token
+            if not token:
+                return {
+                    "ok": False,
+                    "latency_ms": 0,
+                    "message": "Azure API Key is required.",
+                    "hint": "Paste your Azure OpenAI key in the API Key field.",
+                }
+            ver = (api_version or "").strip() or DEFAULT_AZURE_API_VERSION
+            if "/openai/deployments/" in root or "/openai/v1" in root:
+                url = _build_chat_completions_url(root)
+                if "/openai/deployments/" in url and "api-version=" not in url:
+                    sep = "&" if "?" in url else "?"
+                    url = f"{url}{sep}api-version={ver}"
+            else:
+                base_clean = root.split("?", 1)[0].rstrip("/")
+                url = f"{base_clean}/openai/deployments/{deployment}/chat/completions?api-version={ver}"
+            headers = {"api-key": token}
+            if api_token:
+                headers["Authorization"] = f"Bearer {api_token}"
+            req_body: dict[str, Any] = {
+                "model": deployment,
+                "messages": [{"role": "user", "content": "Reply with OK"}],
+                "max_completion_tokens": 16,
+            }
+            status, data = poster(url, req_body, headers, 60.0)
+            if status == 400:
+                err_txt = (json.dumps(data) if isinstance(data, dict) else str(data)).lower()
+                if "max_completion_tokens" in err_txt:
+                    req_body.pop("max_completion_tokens", None)
+                    req_body["max_tokens"] = 16
+                    status, data = poster(url, req_body, headers, 60.0)
+            ms = int((time.monotonic() - start) * 1000)
+            if 200 <= status < 300 and isinstance(data, dict):
+                choices = data.get("choices") or []
+                reply = ""
+                if choices and isinstance(choices[0], dict):
+                    msg = choices[0].get("message") or {}
+                    reply = str(msg.get("content") or msg.get("reasoning") or "").strip()
+                return {
+                    "ok": True,
+                    "status": status,
+                    "latency_ms": ms,
+                    "endpoint": url,
+                    "model": full_model,
+                    "reply": scrub(reply[:120] or "OK"),
+                    "message": f"Connected to Azure OpenAI ({ms} ms).",
                 }
             return _error_result(status, data, url, ms)
 
@@ -453,7 +546,17 @@ def load_ui_state(env_path: Path, workspace: Path | None = None) -> dict[str, An
     model = ws_cfg.get("model") or merged.get("ADK_CODER_MODEL") or "gemini-2.5-flash"
     provider = detect_provider(model)
 
-    if provider == "ollama":
+    api_version = ""
+    if provider == "azure":
+        base_url = ws_cfg.get("azure_api_base") or merged.get("AZURE_API_BASE") or ""
+        api_key = merged.get("AZURE_API_KEY") or ""
+        api_token = merged.get("ADK_CODER_ENDPOINT_API_KEY") or ""
+        api_version = (
+            ws_cfg.get("azure_api_version")
+            or merged.get("AZURE_API_VERSION")
+            or DEFAULT_AZURE_API_VERSION
+        )
+    elif provider == "ollama":
         base_url = ws_cfg.get("ollama_api_base") or merged.get("OLLAMA_API_BASE") or merged.get("OLLAMA_HOST") or "http://127.0.0.1:11434"
         api_key = ""
         api_token = merged.get("ADK_CODER_ENDPOINT_API_KEY") or ""
@@ -486,6 +589,7 @@ def load_ui_state(env_path: Path, workspace: Path | None = None) -> dict[str, An
         "base_url": base_url,
         "api_key": api_key,
         "api_token": api_token,
+        "api_version": api_version,
         "max_tokens": ws_cfg.get("max_tokens", 8192),
         "context_window": ws_cfg.get("context_window", ""),
         "mode": ws_cfg.get("mode") or merged.get("ADK_CODER_MODE") or "ask",
@@ -505,6 +609,7 @@ def save_ui_state(env_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     base_url = _normalize_http_url(str(payload.get("base_url") or ""))
     api_key = str(payload.get("api_key") or "").strip()
     api_token = str(payload.get("api_token") or "").strip()
+    api_version = str(payload.get("api_version") or "").strip()
 
     mode = str(payload.get("mode") or "ask").strip().lower()
     if mode not in {"ask", "auto-edit", "plan", "full-auto"}:
@@ -518,6 +623,11 @@ def save_ui_state(env_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         env_updates["OPENAI_API_BASE"] = base_url
         env_updates["OPENAI_BASE_URL"] = base_url
         env_updates["OPENAI_API_KEY"] = api_key or "local"
+        env_updates["ADK_CODER_ENDPOINT_API_KEY"] = api_token
+    elif provider == "azure":
+        env_updates["AZURE_API_BASE"] = base_url
+        env_updates["AZURE_API_KEY"] = api_key
+        env_updates["AZURE_API_VERSION"] = api_version or DEFAULT_AZURE_API_VERSION
         env_updates["ADK_CODER_ENDPOINT_API_KEY"] = api_token
     elif provider == "ollama":
         env_updates["OLLAMA_HOST"] = base_url or "http://127.0.0.1:11434"
@@ -556,6 +666,13 @@ def save_ui_state(env_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
                 cfg["openai_api_base"] = base_url
             elif provider != "openai-compatible":
                 cfg.pop("openai_api_base", None)
+            if provider == "azure":
+                if base_url:
+                    cfg["azure_api_base"] = base_url
+                cfg["azure_api_version"] = api_version or DEFAULT_AZURE_API_VERSION
+            else:
+                cfg.pop("azure_api_base", None)
+                cfg.pop("azure_api_version", None)
             if provider == "ollama" and base_url:
                 cfg["ollama_api_base"] = base_url
             elif provider != "ollama":
@@ -806,6 +923,7 @@ HTML_PAGE = """<!doctype html>
   <nav class="rail" aria-label="LLM Providers">
     <div class="rail-title">Provider</div>
     <button type="button" class="prov-btn" data-p="openai-compatible"><span>OpenAI / Local</span><span class="prov-dot"></span></button>
+    <button type="button" class="prov-btn" data-p="azure"><span>Azure OpenAI</span><span class="prov-dot"></span></button>
     <button type="button" class="prov-btn" data-p="ollama"><span>Ollama</span><span class="prov-dot"></span></button>
     <button type="button" class="prov-btn" data-p="gemini"><span>Google Gemini</span><span class="prov-dot"></span></button>
     <button type="button" class="prov-btn" data-p="anthropic"><span>Anthropic</span><span class="prov-dot"></span></button>
@@ -848,6 +966,11 @@ HTML_PAGE = """<!doctype html>
             <input id="api_token" type="password" placeholder="Bearer token for custom endpoint" />
             <button type="button" class="btn" onclick="toggleSecret('api_token', this)">Show</button>
           </div>
+        </div>
+
+        <div class="full" id="azureVersionRow" style="display:none;">
+          <label for="api_version">Azure API Version</label>
+          <input id="api_version" placeholder="2024-12-01-preview" />
         </div>
       </div>
 
@@ -929,6 +1052,7 @@ HTML_PAGE = """<!doctype html>
 let currentProvider = 'openai-compatible';
 const DEFAULTS = {
   'openai-compatible': { base: 'http://127.0.0.1:8080/v1', model: 'openai/gpt-4o-mini' },
+  'azure':             { base: 'https://<resource>.openai.azure.com', model: 'azure/gpt-4o', api_version: '2024-12-01-preview' },
   'ollama':            { base: 'http://127.0.0.1:11434', model: 'ollama_chat/qwen2.5-coder:14b' },
   'gemini':            { base: '', model: 'gemini-2.5-flash' },
   'anthropic':         { base: 'https://api.anthropic.com', model: 'anthropic/claude-sonnet-4-20250514' },
@@ -953,9 +1077,14 @@ function toggleSecret(id, btn) {
 function setProvider(p, applyDefaults) {
   currentProvider = p;
   document.querySelectorAll('.prov-btn').forEach(b => b.classList.toggle('active', b.dataset.p === p));
+  const azRow = document.getElementById('azureVersionRow');
+  if (azRow) azRow.style.display = p === 'azure' ? 'block' : 'none';
   if (applyDefaults && DEFAULTS[p]) {
     document.getElementById('base_url').value = DEFAULTS[p].base;
     document.getElementById('model').value = DEFAULTS[p].model;
+    if (DEFAULTS[p].api_version) {
+      document.getElementById('api_version').value = DEFAULTS[p].api_version;
+    }
   }
 }
 
@@ -970,6 +1099,7 @@ function formPayload() {
     model: document.getElementById('model').value.trim(),
     api_key: document.getElementById('api_key').value.trim(),
     api_token: document.getElementById('api_token').value.trim(),
+    api_version: document.getElementById('api_version').value.trim(),
     workspace: document.getElementById('workspace').value.trim(),
     mode: document.getElementById('mode').value,
     max_tokens: document.getElementById('max_tokens').value.trim(),
@@ -996,6 +1126,7 @@ async function loadState() {
   document.getElementById('model').value = s.model || '';
   document.getElementById('api_key').value = s.api_key || '';
   document.getElementById('api_token').value = s.api_token || '';
+  document.getElementById('api_version').value = s.api_version || '2024-12-01-preview';
   document.getElementById('workspace').value = s.workspace || '';
   document.getElementById('mode').value = s.mode || 'ask';
   document.getElementById('max_tokens').value = s.max_tokens || 8192;
@@ -1227,6 +1358,7 @@ def dispatch_request(
                     base_url=str(payload.get("base_url") or ""),
                     api_key=str(payload.get("api_key") or ""),
                     api_token=str(payload.get("api_token") or ""),
+                    api_version=str(payload.get("api_version") or ""),
                     poster=poster,
                 )
             elif path == "/api/discover":
@@ -1363,6 +1495,7 @@ def main(argv: list[str] | None = None) -> int:
             base_url=state["base_url"],
             api_key=state["api_key"],
             api_token=state["api_token"],
+            api_version=state.get("api_version", ""),
         )
         print(json.dumps(result, indent=2))
         return 0 if result.get("ok") else 1

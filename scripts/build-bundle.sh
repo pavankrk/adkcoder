@@ -38,12 +38,21 @@ echo "==> 2. Building npm/npx tarball..."
 rm -rf "$pkg_dir/npm-package/wheels"
 mkdir -p "$pkg_dir/npm-package/wheels"
 cp "$wheel" "$pkg_dir/npm-package/wheels/"
-chmod +x "$pkg_dir/npm-package/bin/adk-coder.js" "$pkg_dir/npm-package/bin/adk-coder-config.js" "$pkg_dir/npm-package/bin/runner.js"
+chmod +x "$pkg_dir/npm-package/bin/adk-coder.js" "$pkg_dir/npm-package/bin/adk-coder-config.js" "$pkg_dir/npm-package/bin/adk-coder-app.js" "$pkg_dir/npm-package/bin/runner.js"
 rm -f "$pkg_dir/dist"/adk-coder-"${version}".tgz
-(cd "$pkg_dir/npm-package" && npm pack --pack-destination "$pkg_dir/dist" >/dev/null)
+(cd "$pkg_dir/npm-package" && npm pack --cache /tmp/npm-cache --pack-destination "$pkg_dir/dist" >/dev/null)
 rm -rf "$pkg_dir/npm-package/wheels"
 npm_tgz="$pkg_dir/dist/adk-coder-${version}.tgz"
 echo "    npm tarball: $npm_tgz"
+
+echo "==> 2b. Building portable install bundle zip..."
+zip_stage="$pkg_dir/dist/install_bundle_stage"
+rm -rf "$zip_stage" "$pkg_dir/dist/adk-coder-${version}-install-bundle.zip"
+mkdir -p "$zip_stage"
+cp "$wheel" "$npm_tgz" "$pkg_dir/scripts/install.ps1" "$pkg_dir/scripts/create-windows-shortcut.ps1" "$pkg_dir/scripts/run-desktop.ps1" "$pkg_dir/scripts/run-desktop.sh" "$pkg_dir/RELEASE_NOTES.md" "$zip_stage/"
+(cd "$zip_stage" && zip -q -r "$pkg_dir/dist/adk-coder-${version}-install-bundle.zip" .)
+rm -rf "$zip_stage"
+echo "    Install bundle zip: $pkg_dir/dist/adk-coder-${version}-install-bundle.zip"
 
 if [ "${1:-}" = "--offline" ]; then
     echo "==> 3. Building offline Python wheelhouse bundle..."

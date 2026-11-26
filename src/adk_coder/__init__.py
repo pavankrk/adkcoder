@@ -5,6 +5,12 @@ import sys
 
 __version__ = "2.1.0"
 
+# Use LiteLLM's bundled local cost map to avoid slow retries/SSL errors behind corporate proxies
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+# Avoid slow/failing remote LiteLLM cost-map fetches behind corporate SSL proxies or offline hosts
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 # Ensure Windows cmd.exe / PowerShell consoles never crash with cp1252 UnicodeEncodeError
 # when rendering Rich UI banners, spinners, or Markdown output.
 if sys.platform == "win32":

@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from .scrubber import scrub
+
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+DEFAULT_AZURE_API_VERSION = "2024-12-01-preview"
 
 LITELLM_PREFIXES = (
     "ollama/",
@@ -24,37 +30,133 @@ LITELLM_PREFIXES = (
 )
 DEFAULT_LITELLM_MAX_TOKENS = 8192
 DEFAULT_LITELLM_TIMEOUT = 120
+_NEEDS_MAX_COMPLETION_TOKENS: set[tuple[str, str]] = set()
+_AZURE_HOST_MARKERS = (
+    ".openai.azure.com",
+    ".cognitiveservices.azure.com",
+    ".services.ai.azure.com",
+    ".azure-api.net",
+)
+_COMPLETION_TOKEN_MODEL_PREFIXES = ("o1", "o3", "o4", "gpt-5", "gpt5")
+
+
+def is_azure_endpoint(api_base: str | None) -> bool:
+    lowered = (api_base or "").strip().lower()
+    return any(marker in lowered for marker in _AZURE_HOST_MARKERS)
+
+
+def uses_max_completion_tokens(model: str, api_base: str | None = None) -> bool:
+    """Return True if the model or endpoint requires `max_completion_tokens` instead of `max_tokens`."""
+    norm_model = (model or "").strip().lower()
+    norm_base = (api_base or "").strip().lower()
+    if (norm_model, norm_base) in _NEEDS_MAX_COMPLETION_TOKENS:
+        return True
+    if norm_model.startswith("azure/") or is_azure_endpoint(norm_base):
+        return True
+    bare = norm_model.split("/", 1)[-1]
+    return any(
+        bare == p or bare.startswith((f"{p}-", f"{p}.", f"{p}_"))
+        for p in _COMPLETION_TOKEN_MODEL_PREFIXES
+    )
+
+
+def _is_max_tokens_unsupported_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "max_completion_tokens" in msg and ("max_tokens" in msg or "unsupported parameter" in msg)
+
+
+def normalize_azure_config(
+    model: str,
+    api_base: str | None,
+    api_version: str | None = None,
+) -> tuple[str, str | None, str | None]:
+    """Normalize Azure OpenAI model, api_base, and api_version for LiteLLM.
+
+    Handles all 3 Azure endpoint formats users commonly paste:
+      1. Clean resource root:  https://<res>.openai.azure.com
+      2. Full deployment URL:  https://<res>.openai.azure.com/openai/deployments/<dep>[/chat/completions][?api-version=...]
+      3. Azure OpenAI v1 URL:  https://<res>.openai.azure.com/openai/v1[/chat/completions]
+    """
+    raw_base = (api_base or "").strip()
+    if not raw_base:
+        eff_ver = (api_version or os.environ.get("AZURE_API_VERSION") or DEFAULT_AZURE_API_VERSION).strip()
+        return model, None, eff_ver
+
+    parsed = urlparse(raw_base)
+    qs = parse_qs(parsed.query)
+    url_ver = ((qs.get("api-version") or [""])[0] or "").strip()
+    clean_path = (parsed.path or "").rstrip("/")
+    for suffix in ("/chat/completions", "/completions"):
+        if clean_path.endswith(suffix):
+            clean_path = clean_path[: -len(suffix)].rstrip("/")
+
+    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+    deployment = model.removeprefix("azure/").removeprefix("openai/").strip()
+
+    # Case 1: Azure OpenAI v1 OpenAI-compatible endpoint (/openai/v1) -> use openai/<deployment>
+    if re.search(r"/openai/v1$", clean_path, re.IGNORECASE):
+        v1_base = f"{origin}{clean_path}" if origin else raw_base.split("?", 1)[0].rstrip("/")
+        return f"openai/{deployment}", v1_base, None
+
+    # Case 2: Deployment-scoped URL (.../openai/deployments/<dep>) -> strip to resource root
+    dep_match = re.search(r"^(.*?)/openai/deployments/([^/]+)(?:/.*)?$", clean_path, re.IGNORECASE)
+    if dep_match:
+        prefix = dep_match.group(1).rstrip("/")
+        url_dep = dep_match.group(2).strip()
+        root_base = f"{origin}{prefix}" if origin else raw_base.split("/openai/deployments/", 1)[0].rstrip("/")
+        eff_dep = url_dep or deployment
+        eff_ver = (
+            url_ver
+            or (api_version or "").strip()
+            or os.environ.get("AZURE_API_VERSION", "").strip()
+            or DEFAULT_AZURE_API_VERSION
+        )
+        return f"azure/{eff_dep}", root_base, eff_ver
+
+    # Case 3: Clean resource root (strip accidental trailing /openai or ?api-version=...)
+    if clean_path.lower().endswith("/openai"):
+        clean_path = clean_path[: -len("/openai")].rstrip("/")
+    root_base = f"{origin}{clean_path}" if origin else raw_base.split("?", 1)[0].rstrip("/")
+    eff_ver = (
+        url_ver
+        or (api_version or "").strip()
+        or os.environ.get("AZURE_API_VERSION", "").strip()
+        or DEFAULT_AZURE_API_VERSION
+    )
+    return f"azure/{deployment}", root_base, eff_ver
 
 
 def resolve_model(
     model: str,
     *,
     api_base: str | None = None,
+    api_version: str | None = None,
     max_tokens: int | None = None,
     timeout: int | None = None,
+    force_max_completion_tokens: bool = False,
 ) -> Any:
     """Resolve a model string into either a native Gemini model ID or configured LiteLlm instance."""
     if not model.startswith(LITELLM_PREFIXES):
         return model
     from google.adk.models.lite_llm import LiteLlm
 
-    options: dict[str, Any] = {
-        "max_tokens": (
-            max_tokens
-            if isinstance(max_tokens, int) and max_tokens > 0
-            else DEFAULT_LITELLM_MAX_TOKENS
-        ),
-        "timeout": (
-            timeout
-            if isinstance(timeout, int) and timeout > 0
-            else DEFAULT_LITELLM_TIMEOUT
-        ),
-        "num_retries": 1,
-    }
+    token_limit = (
+        max_tokens
+        if isinstance(max_tokens, int) and max_tokens > 0
+        else DEFAULT_LITELLM_MAX_TOKENS
+    )
+    effective_model = model
     effective_base = api_base
+    effective_version = api_version
     if not effective_base and model.startswith("openai/"):
         effective_base = os.environ.get("OPENAI_API_BASE") or os.environ.get(
             "OPENAI_BASE_URL"
+        )
+    elif not effective_base and model.startswith("azure/"):
+        effective_base = (
+            os.environ.get("AZURE_API_BASE")
+            or os.environ.get("OPENAI_API_BASE")
+            or os.environ.get("OPENAI_BASE_URL")
         )
     elif not effective_base and model.startswith(("ollama/", "ollama_chat/")):
         ollama_base = os.environ.get("OLLAMA_API_BASE") or os.environ.get(
@@ -66,15 +168,66 @@ def resolve_model(
                 if ollama_base.startswith(("http://", "https://"))
                 else f"http://{ollama_base}"
             )
+
+    if effective_model.startswith("azure/") or (
+        effective_model.startswith("openai/")
+        and is_azure_endpoint(effective_base)
+        and "/openai/deployments/" in (effective_base or "").lower()
+    ):
+        effective_model, effective_base, effective_version = normalize_azure_config(
+            effective_model, effective_base, effective_version
+        )
+
+    use_completion_tokens = force_max_completion_tokens or uses_max_completion_tokens(
+        effective_model, effective_base
+    )
+    options: dict[str, Any] = {
+        "timeout": (
+            timeout
+            if isinstance(timeout, int) and timeout > 0
+            else DEFAULT_LITELLM_TIMEOUT
+        ),
+        "num_retries": 1,
+    }
+    if use_completion_tokens:
+        options["max_completion_tokens"] = token_limit
+        options["drop_params"] = True
+    else:
+        options["max_tokens"] = token_limit
+
     if effective_base:
         options["api_base"] = effective_base
-        if model.startswith("openai/"):
-            options["api_key"] = (
-                os.environ.get("ADK_CODER_ENDPOINT_API_KEY")
-                or os.environ.get("OPENAI_API_KEY")
-                or "local"
-            )
-    return LiteLlm(model=model, **options)
+        if effective_model.startswith(("openai/", "azure/")):
+            if effective_model.startswith("azure/") or is_azure_endpoint(effective_base):
+                api_key = (
+                    os.environ.get("AZURE_API_KEY")
+                    or os.environ.get("ADK_CODER_ENDPOINT_API_KEY")
+                    or os.environ.get("OPENAI_API_KEY")
+                    or "local"
+                )
+            else:
+                api_key = (
+                    os.environ.get("ADK_CODER_ENDPOINT_API_KEY")
+                    or os.environ.get("OPENAI_API_KEY")
+                    or "local"
+                )
+            options["api_key"] = api_key
+            if (
+                effective_model.startswith("openai/")
+                and is_azure_endpoint(effective_base)
+                and api_key
+                and api_key != "local"
+            ):
+                options["extra_headers"] = {"api-key": api_key}
+    if effective_model.startswith("azure/"):
+        eff_ver = (
+            effective_version
+            or os.environ.get("AZURE_API_VERSION")
+            or DEFAULT_AZURE_API_VERSION
+        ).strip()
+        if eff_ver:
+            options["api_version"] = eff_ver
+    return LiteLlm(model=effective_model, **options)
 
 
 async def generate(
@@ -84,6 +237,7 @@ async def generate(
     tools=(),
     *,
     api_base: str | None = None,
+    api_version: str | None = None,
     max_tokens: int | None = None,
     timeout: int | None = None,
     output_schema: Any = None,
@@ -98,20 +252,24 @@ async def generate(
 ) -> str:
     from google.adk.agents import Agent
 
-    resolved_model = resolve_model(
-        model, api_base=api_base, max_tokens=max_tokens, timeout=timeout
-    )
-
-    agent_kwargs: dict[str, Any] = {
-        "name": "coding_assistant",
-        "model": resolved_model,
-        "instruction": instruction,
-        "tools": list(tools),
-    }
-    if output_schema is not None:
-        agent_kwargs["output_schema"] = output_schema
-
-    agent = Agent(**agent_kwargs)
+    def _build_agent(force_mct: bool = False) -> Any:
+        resolved_model = resolve_model(
+            model,
+            api_base=api_base,
+            api_version=api_version,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            force_max_completion_tokens=force_mct,
+        )
+        agent_kwargs: dict[str, Any] = {
+            "name": "coding_assistant",
+            "model": resolved_model,
+            "instruction": instruction,
+            "tools": list(tools),
+        }
+        if output_schema is not None:
+            agent_kwargs["output_schema"] = output_schema
+        return Agent(**agent_kwargs)
 
     run_kwargs: dict[str, Any] = {}
     if run_agent is _DEFAULT_RUN_AGENT:
@@ -132,9 +290,20 @@ async def generate(
         if abort_signal is not None:
             run_kwargs["abort_signal"] = abort_signal
 
-    if run_kwargs:
-        return await run_agent(agent, prompt, **run_kwargs)
-    return await run_agent(agent, prompt)
+    async def _invoke(agent_obj: Any) -> str:
+        if run_kwargs:
+            return await run_agent(agent_obj, prompt, **run_kwargs)
+        return await run_agent(agent_obj, prompt)
+
+    try:
+        return await _invoke(_build_agent(False))
+    except Exception as exc:
+        if _is_max_tokens_unsupported_error(exc) and not uses_max_completion_tokens(model, api_base):
+            _NEEDS_MAX_COMPLETION_TOKENS.add(
+                ((model or "").strip().lower(), (api_base or "").strip().lower())
+            )
+            return await _invoke(_build_agent(True))
+        raise
 
 
 async def run_agent(

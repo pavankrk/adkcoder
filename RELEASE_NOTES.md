@@ -2,7 +2,7 @@
 
 ## v2.1.0 — Native Desktop Agent IDE & Developer Productivity Release
 
-**Branch:** `adk-coder-v2.1` | **Tests:** 90 passed (`pytest`), `ruff` clean
+**Branch:** `adk-coder-v2.1` | **Tests:** 92 passed (`pytest`), `ruff` clean
 
 ### Highlights
 
@@ -30,18 +30,25 @@
   - **Customizations → Extensions**: Manage workspace Skills, Custom `/commands`, `.agent/hooks.json` lifecycle hooks, and `.agent/mcp.json` MCP servers.
   - **Automations → New Project Scaffolder**: Wizard for `fastapi-service`, `java-spring`, `adk-python`, `adk-typescript`, and `go-a2a` with optional `requirements.md` and automatic workspace opening.
 
-#### 3. Reliability & Bug Fixes
+#### 3. First-Class Azure OpenAI Provider & Enterprise Proxy Support
+- **Dedicated `azure` Provider**: Added **Azure OpenAI** across Web Config UI (`adk-coder --config`), Desktop **Customizations**, saved Profiles, and CLI (`AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `azure/<deployment>`).
+- **Automatic `max_completion_tokens` Routing**: Sends `max_completion_tokens` + `drop_params=True` automatically for Azure endpoints and OpenAI `o1` / `o3` / `o4` / `gpt-5` models, with transparent HTTP 400 retry + session caching for custom corporate gateways.
+- **Smart Azure URL Normalization**: Supports pasting a clean Azure resource root (`https://<resource>.openai.azure.com`), a full deployment URL (`.../openai/deployments/<dep>[/chat/completions][?api-version=...]`), or an Azure OpenAI v1 URL (`.../openai/v1`) without path duplication or `404 Resource not found` errors.
+- **Corporate SSL Proxy Friendly**: Sets `LITELLM_LOCAL_MODEL_COST_MAP=True` by default to eliminate slow remote cost-map retries and `UnknownIssuer` SSL warnings behind corporate proxies.
+
+#### 4. Reliability & Bug Fixes
 - **Instant Stop / Abort (`■`)**: 3-layer cancellation kills active shell subprocesses (`subprocess.Popen`), races LLM stream reads against `abort_signal` with bounded `runner.close()` timeout, clears queued messages, and cleanly detaches lingering sync calls while preserving partial output (`*(Stopped by user)*`) in session history.
 - **Reliable Chat Turn Completion**: Added `GET /api/chat/status` live polling alongside SSE so turns never stall in WKWebView, and persisted slash commands, stopped turns, and errors to `session_history.json`.
 - **Workspace & Profile Sync**: Replaced WKWebView-incompatible `window.prompt()`/`alert()` dialogs with an in-app **Switch or Open Workspace** modal (path input + native folder picker + recent workspaces), synced active global profiles/`.env` across all switched workspaces, and fixed profile **Use** / **Delete** button handling in both Web Config UI (`adk-coder --config`) and Desktop Customizations.
 
-#### 4. Cross-Platform Packaging & Native Launchers
+#### 5. Cross-Platform Packaging, Install Bundle & In-Place Upgrades
+- **Portable All-in-One Bundle**: `./scripts/build-bundle.sh` builds `dist/adk-coder-2.1.0-install-bundle.zip` (Python wheel, npm `.tgz`, `install.ps1`, `create-windows-shortcut.ps1`, `run-desktop.ps1`, `run-desktop.sh`, and `RELEASE_NOTES.md`).
 - **macOS App Bundle**: `./scripts/build-macos-app.sh` builds a clickable `dist/ADK Coder.app` (launches natively with no terminal window).
-- **Windows Shortcut & `npx` Support**: `scripts/create-windows-shortcut.ps1` creates Desktop / Start Menu shortcuts, and `npm-package/bin/runner.js` auto-installs `adk-coder[local,desktop]` (`pywebview`) when launched via `npx --package .\adk-coder-2.1.0.tgz adk-coder-app` or `adk-coder --app`.
+- **Windows In-Place Upgrades & `npx` Support**: `scripts/install.ps1` now installs `[local,desktop]` and updates existing `%LOCALAPPDATA%\adk-coder\venv` installations cleanly in place; `npm-package/bin/runner.js` auto-updates wheels via `.wheel-stamp` and auto-installs `pywebview` on `adk-coder-app` / `--app`.
 
 ---
 
-### Install & Launch
+### Install & Update
 
 **macOS / Linux:**
 ```bash
@@ -57,9 +64,12 @@
 # Direct with npx using the bundled tarball:
 npx --package .\adk-coder-2.1.0.tgz adk-coder-app
 
-# Or install globally once:
+# Install or update globally via npm (auto-updates wheel on next launch):
 npm install -g .\adk-coder-2.1.0.tgz
 adk-coder-app
+
+# Or install/update in place via PowerShell installer:
+.\install.ps1 -Wheel .\adk_coder-2.1.0-py3-none-any.whl
 ```
 
 ---
