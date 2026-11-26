@@ -3,7 +3,7 @@
 import os
 import sys
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 # Use LiteLLM's bundled local cost map to avoid slow retries/SSL errors behind corporate proxies
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")

@@ -13,10 +13,13 @@ import json
 import os
 import queue
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 import uuid
 from contextlib import suppress
 from http import HTTPStatus
@@ -29,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 from . import __version__
 from .config_ui import (
     _http_post_json,
+    _ssl_context,
     default_env_path,
     detect_provider,
     load_global_env,
@@ -213,6 +217,334 @@ def _auto_title_from_prompt(prompt: str) -> str:
     return cleaned[:41].rstrip() + "..."
 
 
+def _split_file_diff_hunks(diff_txt: str) -> tuple[str, list[dict[str, Any]]]:
+    """Split a single-file unified diff into its file header and individual @@ hunks."""
+    header_lines: list[str] = []
+    hunks: list[dict[str, Any]] = []
+    cur_hunk: list[str] = []
+    in_hunks = False
+    for line in diff_txt.splitlines():
+        if line.startswith("@@ "):
+            if cur_hunk:
+                hunks.append(_format_hunk_entry(len(hunks), cur_hunk))
+            cur_hunk = [line]
+            in_hunks = True
+        elif in_hunks:
+            cur_hunk.append(line)
+        else:
+            header_lines.append(line)
+    if cur_hunk:
+        hunks.append(_format_hunk_entry(len(hunks), cur_hunk))
+    return "\n".join(header_lines), hunks
+
+
+def _format_hunk_entry(index: int, lines: list[str]) -> dict[str, Any]:
+    added = sum(1 for ln in lines[1:] if ln.startswith("+"))
+    deleted = sum(1 for ln in lines[1:] if ln.startswith("-"))
+    return {
+        "index": index,
+        "header": lines[0] if lines else "",
+        "added": added,
+        "deleted": deleted,
+        "patch": scrub("\n".join(lines))[:12000],
+    }
+
+
+def _revert_git_hunk(h: AgentHarness, rel_path: str, hunk_index: int) -> dict[str, Any]:
+    """Revert a single unified diff hunk in a tracked workspace file."""
+    if not rel_path:
+        raise ValueError("File path is required.")
+    h.tools.path(rel_path)
+    diff_txt = ""
+    staged_only = False
+    try:
+        diff_txt = h.git.run("diff", "--", rel_path)
+    except ValueError:
+        diff_txt = ""
+    if not diff_txt.strip():
+        diff_txt = h.git.run("diff", "HEAD", "--", rel_path)
+        staged_only = True
+    file_header, hunks = _split_file_diff_hunks(diff_txt)
+    if hunk_index < 0 or hunk_index >= len(hunks):
+        raise ValueError(f"Hunk index {hunk_index} out of range (found {len(hunks)} hunks).")
+    # Reconstruct raw (unscrubbed) hunk patch from diff_txt so git apply matches exact bytes.
+    raw_hunks: list[list[str]] = []
+    cur: list[str] = []
+    for line in diff_txt.splitlines():
+        if line.startswith("@@ "):
+            if cur:
+                raw_hunks.append(cur)
+            cur = [line]
+        elif cur:
+            cur.append(line)
+    if cur:
+        raw_hunks.append(cur)
+    patch_text = file_header + "\n" + "\n".join(raw_hunks[hunk_index]) + "\n"
+
+    cmd = ["git", "apply", "--reverse", "--unidiff-zero"]
+    if staged_only:
+        cmd.append("--index")
+    cmd.append("-")
+    proc = subprocess.run(
+        cmd,
+        cwd=h.root,
+        input=patch_text,
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+    if proc.returncode != 0:
+        # Retry with standard context matching if --unidiff-zero fails on edge diffs
+        fallback_cmd = ["git", "apply", "--reverse"] + (["--index"] if staged_only else []) + ["-"]
+        proc2 = subprocess.run(
+            fallback_cmd,
+            cwd=h.root,
+            input=patch_text,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        if proc2.returncode != 0:
+            raise ValueError(scrub((proc2.stderr or proc.stderr or "Failed to revert hunk.").strip()))
+    return {"ok": True, "path": rel_path, "hunk_index": hunk_index}
+
+
+def _read_memory(h: AgentHarness) -> dict[str, Any]:
+    """Read durable project memory from .agent/MEMORY.md."""
+    mem_path = h.state / "MEMORY.md"
+    content = ""
+    if mem_path.is_file():
+        with suppress(OSError, UnicodeError):
+            content = scrub(mem_path.read_text(encoding="utf8"))
+    rules: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("- ", "* ")) and len(stripped) > 2:
+            rules.append(stripped[2:].strip())
+    return {
+        "path": ".agent/MEMORY.md",
+        "content": content,
+        "rules": rules,
+        "count": len(rules),
+    }
+
+
+def _update_memory(h: AgentHarness, payload: dict[str, Any]) -> dict[str, Any]:
+    """Add, remove, or save rules in .agent/MEMORY.md."""
+    mem_path = h.state / "MEMORY.md"
+    existing = ""
+    if mem_path.is_file():
+        with suppress(OSError, UnicodeError):
+            existing = mem_path.read_text(encoding="utf8")
+
+    if "add_rule" in payload:
+        rule = scrub(str(payload.get("add_rule") or "").strip())
+        if not rule:
+            raise ValueError("Memory rule cannot be empty.")
+        base = existing.rstrip()
+        if not base:
+            new_content = f"# Project Memory\n\n- {rule}\n"
+        else:
+            new_content = f"{base}\n- {rule}\n"
+    elif "remove_index" in payload:
+        idx = int(payload.get("remove_index", -1))
+        lines = existing.splitlines()
+        bullet_positions = [
+            i for i, ln in enumerate(lines) if ln.strip().startswith(("- ", "* ")) and len(ln.strip()) > 2
+        ]
+        if idx < 0 or idx >= len(bullet_positions):
+            raise ValueError("Memory rule index out of range.")
+        lines.pop(bullet_positions[idx])
+        new_content = ("\n".join(lines).rstrip() + "\n") if lines else ""
+    else:
+        new_content = scrub(str(payload.get("content") or ""))
+        if new_content and not new_content.endswith("\n"):
+            new_content += "\n"
+
+    atomic_write(mem_path, new_content, mode=0o600)
+    return {"ok": True, **_read_memory(h)}
+
+
+def _autodetect_verify_command(root: Path) -> str:
+    """Best-effort test/verify command detection for Auto-Verify."""
+    venv_pytest = root / ".venv" / "bin" / "pytest"
+    if venv_pytest.is_file():
+        return f"{shlex.quote(str(venv_pytest))} -q"
+    if (root / "pytest.ini").is_file() or (root / "pyproject.toml").is_file() or (root / "tests").is_dir():
+        if shutil.which("pytest"):
+            return "pytest -q"
+        return f"{shlex.quote(sys.executable)} -m pytest -q"
+    if (root / "package.json").is_file():
+        return "npm test"
+    if (root / "pom.xml").is_file():
+        return "mvn -B test"
+    if (root / "Cargo.toml").is_file():
+        return "cargo test"
+    if (root / "go.mod").is_file():
+        return "go test ./..."
+    return ""
+
+
+def _build_curl_command(method: str, url: str, headers: dict[str, str], body: str) -> str:
+    parts = ["curl", "-i", "-X", method.upper(), shlex.quote(url)]
+    for k, v in headers.items():
+        if k.strip():
+            parts.extend(["-H", shlex.quote(f"{k.strip()}: {v}")])
+    if body and method.upper() not in {"GET", "HEAD"}:
+        parts.extend(["-d", shlex.quote(body)])
+    return scrub(" ".join(parts))
+
+
+def _execute_rest_request(
+    method: str,
+    url: str,
+    headers: dict[str, Any] | None = None,
+    body: str = "",
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """Execute an HTTP request for the Desktop API Tester drawer using _ssl_context()."""
+    clean_method = (method or "GET").strip().upper()
+    if clean_method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+        raise ValueError(f"Unsupported HTTP method: {clean_method}")
+    clean_url = (url or "").strip()
+    if not clean_url:
+        raise ValueError("Request URL is required.")
+    if not clean_url.startswith(("http://", "https://")):
+        clean_url = f"http://{clean_url}"
+
+    clean_headers: dict[str, str] = {}
+    if isinstance(headers, dict):
+        for k, v in headers.items():
+            ks = str(k).strip()
+            if ks:
+                clean_headers[ks] = str(v)
+
+    req_body_bytes: bytes | None = None
+    body_str = str(body or "")
+    if body_str and clean_method not in {"GET", "HEAD"}:
+        req_body_bytes = body_str.encode("utf8")
+        if not any(k.lower() == "content-type" for k in clean_headers):
+            clean_headers["Content-Type"] = "application/json"
+
+    curl_cmd = _build_curl_command(clean_method, clean_url, clean_headers, body_str)
+    req_headers = {"User-Agent": f"adk-coder/{__version__}", **clean_headers}
+    req = urllib.request.Request(
+        clean_url,
+        data=req_body_bytes,
+        headers=req_headers,
+        method=clean_method,
+    )
+    ctx = _ssl_context() if clean_url.startswith("https://") else None
+    t0 = monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=max(1.0, min(float(timeout), 120.0)), context=ctx) as resp:
+            raw_bytes = resp.read(120_000)
+            elapsed_ms = int((monotonic() - t0) * 1000)
+            text = raw_bytes.decode("utf8", errors="replace")
+            is_json = False
+            try:
+                parsed_json = json.loads(text)
+                text = json.dumps(parsed_json, indent=2)
+                is_json = True
+            except (json.JSONDecodeError, ValueError):
+                pass
+            return {
+                "ok": 200 <= resp.status < 400,
+                "status": resp.status,
+                "reason": getattr(resp, "reason", "") or "",
+                "latency_ms": elapsed_ms,
+                "headers": {k: scrub(v) for k, v in resp.headers.items()},
+                "body": scrub(text)[:80000],
+                "is_json": is_json,
+                "size_bytes": len(raw_bytes),
+                "curl": curl_cmd,
+                "error": "",
+            }
+    except urllib.error.HTTPError as exc:
+        elapsed_ms = int((monotonic() - t0) * 1000)
+        err_raw = exc.read(64_000).decode("utf8", errors="replace")
+        is_json = False
+        try:
+            err_raw = json.dumps(json.loads(err_raw), indent=2)
+            is_json = True
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return {
+            "ok": False,
+            "status": exc.code,
+            "reason": str(exc.reason or ""),
+            "latency_ms": elapsed_ms,
+            "headers": {k: scrub(v) for k, v in (exc.headers.items() if exc.headers else [])},
+            "body": scrub(err_raw)[:80000],
+            "is_json": is_json,
+            "size_bytes": len(err_raw.encode("utf8")),
+            "curl": curl_cmd,
+            "error": f"HTTP {exc.code} {exc.reason}",
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        elapsed_ms = int((monotonic() - t0) * 1000)
+        return {
+            "ok": False,
+            "status": 0,
+            "reason": "Connection Error",
+            "latency_ms": elapsed_ms,
+            "headers": {},
+            "body": "",
+            "is_json": False,
+            "size_bytes": 0,
+            "curl": curl_cmd,
+            "error": scrub(str(exc)),
+        }
+
+
+def _export_session_markdown(h: AgentHarness) -> dict[str, Any]:
+    """Render the active session transcript and metadata as downloadable Markdown."""
+    branch, _ = h.git_info()
+    history = h._load_history()
+    pinned = h._load_pinned()
+    cur_sess = h.sessions.get(h.active_session_id)
+    sess_name = (cur_sess or {}).get("name") or h.active_session_id or "session"
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{h.root.name}_{sess_name}").strip("_")[:64] or "session"
+    sections = [
+        f"# ADK Coder Session — {h.root.name} ({sess_name})",
+        "\n".join(
+            [
+                f"- **Workspace**: `{h.root}`",
+                f"- **Branch**: `{branch or '(detached/no-git)'}`",
+                f"- **Model**: `{h.model}`",
+                f"- **Mode**: `{h.mode}`",
+                f"- **Pinned Files**: {', '.join(f'`{p}`' for p in pinned) or '(none)'}",
+            ]
+        ),
+    ]
+    tasks_md = h.read("TASKS.md").strip()
+    if tasks_md and tasks_md != "# Tasks":
+        sections.append("## Tasks\n\n" + tasks_md)
+    if history:
+        turns_md: list[str] = []
+        for turn in history:
+            speaker = "Developer" if turn.get("role") == "user" else "ADK Coder"
+            block = f"### {speaker}\n\n{turn.get('text', '')}"
+            steps = turn.get("steps") or []
+            if steps:
+                step_lines = [
+                    f"- [{s.get('status', 'done')}] `{s.get('name', 'tool')}` — {s.get('summary', '')}"
+                    for s in steps
+                ]
+                block += "\n\n**Steps:**\n" + "\n".join(step_lines)
+            av = turn.get("auto_verify")
+            if isinstance(av, dict) and av.get("status"):
+                block += f"\n\n**Auto-Verify:** `{av['status']}` (`{av.get('command', '')}`)"
+            turns_md.append(block)
+        sections.append("## Conversation\n\n" + "\n\n---\n\n".join(turns_md))
+    else:
+        sections.append("## Conversation\n\n_(empty session)_")
+    markdown = scrub("\n\n".join(sections).rstrip() + "\n")
+    return {"ok": True, "filename": f"{safe_stem}.md", "markdown": markdown}
+
+
 def _parse_git_file_diffs(root: Path, status_txt: str, diff_txt: str) -> list[dict[str, Any]]:
     """Split unified git diff and status into per-file records for interactive review & revert."""
     file_diffs: dict[str, str] = {}
@@ -246,6 +578,7 @@ def _parse_git_file_diffs(root: Path, status_txt: str, diff_txt: str) -> list[di
     results: list[dict[str, Any]] = []
     for rel in all_paths[:80]:
         fdiff = file_diffs.get(rel, "")
+        _, hunks = _split_file_diff_hunks(fdiff) if fdiff else ("", [])
         added = sum(1 for ln in fdiff.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
         deleted = sum(1 for ln in fdiff.splitlines() if ln.startswith("-") and not ln.startswith("---"))
         st = status_map.get(rel, "M")
@@ -265,6 +598,7 @@ def _parse_git_file_diffs(root: Path, status_txt: str, diff_txt: str) -> list[di
                 "added": added,
                 "deleted": deleted,
                 "diff": scrub(fdiff)[:20000],
+                "hunks": hunks,
             }
         )
     return results
@@ -373,6 +707,7 @@ class DesktopController:
             "error": "",
             "pending_approval": None,
             "debug_pipeline": None,
+            "auto_verify": None,
         }
         self._active_abort: asyncio.Event | None = None
         self._active_loop: asyncio.AbstractEventLoop | None = None
@@ -497,6 +832,7 @@ class DesktopController:
                 "error": self._turn_snapshot.get("error", ""),
                 "pending_approval": self._turn_snapshot.get("pending_approval"),
                 "debug_pipeline": self._turn_snapshot.get("debug_pipeline"),
+                "auto_verify": self._turn_snapshot.get("auto_verify"),
                 "queued_messages": list(self._queue),
             }
 
@@ -980,6 +1316,8 @@ class DesktopController:
             "queued_messages": list(self._queue),
             "watch": self.watch_status(),
             "debug_report_exists": (h.root / "docs" / "DEBUG_REPORT.md").is_file(),
+            "auto_verify": bool(h.config.get("auto_verify", False)),
+            "memory_count": _read_memory(h)["count"],
         }
 
     def start_chat_turn(self, message: str, workspace: str | None = None) -> dict[str, Any]:
@@ -1007,6 +1345,7 @@ class DesktopController:
                 "steps": [],
                 "error": "",
                 "pending_approval": None,
+                "auto_verify": None,
                 "debug_pipeline": (
                     {
                         "active": True,
@@ -1264,6 +1603,7 @@ class DesktopController:
         turn_status = "done"
         turn_error = ""
         saved_reply = ""
+        auto_verify_res: dict[str, Any] | None = None
 
         async def _run_execute() -> str:
             if self._abort_requested or abort_ev.is_set():
@@ -1286,6 +1626,102 @@ class DesktopController:
             final_text = (result or "").strip() or captured_txt or "".join(streamed_text_chunks).strip() or "Done."
             saved_reply = scrub(final_text)
             edits_delta = max(0, h.tools.edit_history_count() - edits_before)
+
+            # Auto-Verify: automatically run project tests after file edits, with 1 self-fix retry
+            if (
+                edits_delta > 0
+                and not message.startswith("/")
+                and bool(h.config.get("auto_verify", False))
+                and not self._abort_requested
+                and not abort_ev.is_set()
+            ):
+                verify_cmd = (h.test_command() or "").strip() or _autodetect_verify_command(h.root)
+                if verify_cmd:
+                    exec_args = ["cmd", "/c", verify_cmd] if sys.platform == "win32" else ["/bin/sh", "-c", verify_cmd]
+                    with self._lock:
+                        self._turn_snapshot["auto_verify"] = {
+                            "status": "running",
+                            "command": verify_cmd,
+                            "attempts": 1,
+                        }
+                    self.emit(
+                        {
+                            "type": "auto_verify",
+                            "turn_id": turn_id,
+                            "status": "running",
+                            "command": verify_cmd,
+                            "attempts": 1,
+                        }
+                    )
+                    vproc = subprocess.run(
+                        exec_args,
+                        cwd=h.root,
+                        capture_output=True,
+                        text=True,
+                        errors="replace",
+                        timeout=180,
+                        check=False,
+                    )
+                    vout = scrub((vproc.stdout + vproc.stderr)[-4000:])
+                    if vproc.returncode == 0:
+                        auto_verify_res = {
+                            "status": "pass",
+                            "command": verify_cmd,
+                            "attempts": 1,
+                            "output": vout,
+                        }
+                    elif not self._abort_requested and not abort_ev.is_set():
+                        with self._lock:
+                            self._turn_snapshot["auto_verify"] = {
+                                "status": "fixing",
+                                "command": verify_cmd,
+                                "attempts": 2,
+                            }
+                        self.emit(
+                            {
+                                "type": "auto_verify",
+                                "turn_id": turn_id,
+                                "status": "fixing",
+                                "command": verify_cmd,
+                                "attempts": 2,
+                            }
+                        )
+                        fix_prompt = (
+                            f"Auto-Verify ran `{verify_cmd}` after your recent edits and it failed "
+                            f"(exit {vproc.returncode}). Fix the root cause cleanly with minimal edits.\n\n"
+                            f"Failure output:\n{vout[-3000:]}"
+                        )
+                        with suppress(Exception):
+                            fix_reply = loop.run_until_complete(h.chat(fix_prompt))
+                            if fix_reply and fix_reply.strip():
+                                saved_reply = scrub(f"{saved_reply}\n\n---\n**Auto-Verify Self-Fix:**\n{fix_reply.strip()}")
+                        vproc2 = subprocess.run(
+                            exec_args,
+                            cwd=h.root,
+                            capture_output=True,
+                            text=True,
+                            errors="replace",
+                            timeout=180,
+                            check=False,
+                        )
+                        vout2 = scrub((vproc2.stdout + vproc2.stderr)[-4000:])
+                        auto_verify_res = {
+                            "status": "fixed" if vproc2.returncode == 0 else "fail",
+                            "command": verify_cmd,
+                            "attempts": 2,
+                            "output": vout2,
+                        }
+                    else:
+                        auto_verify_res = {
+                            "status": "fail",
+                            "command": verify_cmd,
+                            "attempts": 1,
+                            "output": vout,
+                        }
+                    with self._lock:
+                        self._turn_snapshot["auto_verify"] = auto_verify_res
+                    self.emit({"type": "auto_verify", "turn_id": turn_id, **auto_verify_res})
+
             elapsed = round(monotonic() - started_at, 1)
             outcome_event = {
                 "type": "turn_done",
@@ -1294,8 +1730,9 @@ class DesktopController:
                 "elapsed_s": elapsed,
                 "steps_count": len(steps),
                 "steps": steps,
-                "edits_delta": edits_delta,
+                "edits_delta": max(0, h.tools.edit_history_count() - edits_before),
                 "model": h.model,
+                "auto_verify": auto_verify_res,
             }
         except asyncio.CancelledError:
             turn_status = "aborted"
@@ -1365,18 +1802,23 @@ class DesktopController:
                     cur_history = h._load_history()
                     if len(cur_history) <= history_len_before and saved_reply:
                         cur_history.append({"role": "user", "text": scrub(message)})
-                        cur_history.append(
-                            {
-                                "role": "model",
-                                "text": saved_reply,
-                                "steps": saved_steps,
-                                "elapsed_s": elapsed_total,
-                            }
-                        )
+                        model_turn: dict[str, Any] = {
+                            "role": "model",
+                            "text": saved_reply,
+                            "steps": saved_steps,
+                            "elapsed_s": elapsed_total,
+                        }
+                        if auto_verify_res:
+                            model_turn["auto_verify"] = auto_verify_res
+                        cur_history.append(model_turn)
                         h._save_history(cur_history)
-                    elif saved_steps and cur_history and cur_history[-1].get("role") == "model":
-                        cur_history[-1]["steps"] = saved_steps
+                    elif cur_history and cur_history[-1].get("role") == "model":
+                        if saved_steps:
+                            cur_history[-1]["steps"] = saved_steps
                         cur_history[-1]["elapsed_s"] = elapsed_total
+                        if auto_verify_res:
+                            cur_history[-1]["auto_verify"] = auto_verify_res
+                            cur_history[-1]["text"] = saved_reply
                         h._save_history(cur_history)
                 except OSError:
                     pass
@@ -1437,8 +1879,11 @@ def dispatch_desktop_request(
     qs = parse_qs(parsed.query)
     ws_param = (qs.get("workspace") or [""])[0] or str(payload.get("workspace") or "")
 
-    # Delegate settings & profile routes directly to config_ui (and reload harness on save)
-    if path in {"/api/state", "/api/save", "/api/test", "/api/discover"} or path.startswith("/api/profiles"):
+    # Delegate settings, network & profile routes directly to config_ui (and reload harness on save)
+    if (
+        path in {"/api/state", "/api/save", "/api/test", "/api/discover", "/api/network"}
+        or path.startswith("/api/profiles")
+    ):
         active_ws_path = Path(ws_param or ctrl._active_ws)
 
         def _on_cfg_save(_data: Any) -> None:
@@ -1512,6 +1957,16 @@ def dispatch_desktop_request(
                 target = h.tools.path(rel)
                 text = scrub(target.read_text(encoding="utf8", errors="replace"))[:60000]
                 return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps({"path": rel, "content": text}).encode("utf8")
+            if path == "/api/memory":
+                h = ctrl.get_harness(ws_param or None)
+                return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(_read_memory(h)).encode("utf8")
+            if path == "/api/rest/routes":
+                h = ctrl.get_harness(ws_param or None)
+                d = analyze_structure(h.root, ".")
+                return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps({"ok": True, "routes": d["routes"][:120]}).encode("utf8")
+            if path == "/api/session/export":
+                h = ctrl.get_harness(ws_param or None)
+                return HTTPStatus.OK, "application/json; charset=utf-8", json.dumps(_export_session_markdown(h)).encode("utf8")
             if path == "/api/diff":
                 h = ctrl.get_harness(ws_param or None)
                 try:
@@ -1626,6 +2081,48 @@ def dispatch_desktop_request(
                     else:
                         raise
                 data = {"ok": True, "state": ctrl.bootstrap_state()}
+            elif path == "/api/git/revert-hunk":
+                h = ctrl.get_harness(ws_param or None)
+                rel = str(payload.get("path") or "").strip()
+                hunk_idx = int(payload.get("hunk_index", -1))
+                res = _revert_git_hunk(h, rel, hunk_idx)
+                data = {**res, "state": ctrl.bootstrap_state()}
+            elif path == "/api/file/save":
+                h = ctrl.get_harness(ws_param or None)
+                rel = str(payload.get("path") or "").strip()
+                if not rel:
+                    raise ValueError("File path is required.")
+                content = str(payload.get("content") or "")
+                target = h.tools.path(rel)
+                existed = target.is_file()
+                raw_before = target.read_bytes() if existed else b""
+                h.tools._record_undo(target, existed, raw_before)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write(target, content)
+                data = {
+                    "ok": True,
+                    "path": target.relative_to(h.root).as_posix(),
+                    "bytes": len(content.encode("utf8")),
+                    "state": ctrl.bootstrap_state(),
+                }
+            elif path == "/api/memory":
+                h = ctrl.get_harness(ws_param or None)
+                res = _update_memory(h, payload)
+                data = {**res, "state": ctrl.bootstrap_state()}
+            elif path == "/api/auto-verify":
+                h = ctrl.get_harness(ws_param or None)
+                enabled = bool(payload.get("enabled", False))
+                h.config["auto_verify"] = enabled
+                h.write("config.json", json.dumps(h.config, indent=2) + "\n")
+                data = {"ok": True, "auto_verify": enabled, "state": ctrl.bootstrap_state()}
+            elif path == "/api/rest/send":
+                data = _execute_rest_request(
+                    str(payload.get("method") or "GET"),
+                    str(payload.get("url") or ""),
+                    payload.get("headers") if isinstance(payload.get("headers"), dict) else None,
+                    str(payload.get("body") or ""),
+                    float(payload.get("timeout") or 30.0),
+                )
             elif path == "/api/git/commit":
                 h = ctrl.get_harness(ws_param or None)
                 msg = str(payload.get("message") or "").strip()

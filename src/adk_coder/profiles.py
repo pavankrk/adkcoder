@@ -28,7 +28,7 @@ def profiles_path(env_path: Path | None = None) -> Path:
 
 
 def _empty_store() -> dict[str, Any]:
-    return {"active": "", "fallback": "", "profiles": {}}
+    return {"active": "", "fallback": "", "fast": "", "profiles": {}}
 
 
 def load_profiles(env_path: Path | None = None) -> dict[str, Any]:
@@ -47,6 +47,7 @@ def load_profiles(env_path: Path | None = None) -> dict[str, Any]:
     return {
         "active": str(data.get("active") or ""),
         "fallback": str(data.get("fallback") or ""),
+        "fast": str(data.get("fast") or ""),
         "profiles": profs,
     }
 
@@ -121,6 +122,8 @@ def delete_profile(name: str, *, env_path: Path | None = None) -> dict[str, Any]
         store["active"] = ""
     if store["fallback"] == clean_name:
         store["fallback"] = ""
+    if store["fast"] == clean_name:
+        store["fast"] = ""
     _write_profiles(store, env_path)
     return store
 
@@ -134,6 +137,19 @@ def set_fallback_profile(name: str, *, env_path: Path | None = None) -> dict[str
         if clean_name not in store["profiles"]:
             raise ValueError(f"Fallback profile not found: {clean_name}")
         store["fallback"] = clean_name
+    _write_profiles(store, env_path)
+    return store
+
+
+def set_fast_profile(name: str, *, env_path: Path | None = None) -> dict[str, Any]:
+    clean_name = name.strip()
+    store = load_profiles(env_path)
+    if clean_name.lower() in {"", "none", "off", "clear"}:
+        store["fast"] = ""
+    else:
+        if clean_name not in store["profiles"]:
+            raise ValueError(f"Fast profile not found: {clean_name}")
+        store["fast"] = clean_name
     _write_profiles(store, env_path)
     return store
 
@@ -231,6 +247,18 @@ def get_fallback_profile(
     return fb_name, prof
 
 
+def get_fast_profile(
+    *,
+    env_path: Path | None = None,
+) -> tuple[str, dict[str, Any]] | None:
+    """Return (name, profile) for the configured fast/routing profile if present."""
+    store = load_profiles(env_path)
+    fast_name = store.get("fast") or ""
+    if not fast_name or fast_name not in store["profiles"]:
+        return None
+    return fast_name, store["profiles"][fast_name]
+
+
 def is_transient_provider_error(exc: Exception) -> bool:
     """Return True for network/endpoint/timeout errors that warrant profile failover."""
     name = type(exc).__name__.lower()
@@ -286,6 +314,7 @@ def masked_profiles_summary(env_path: Path | None = None) -> dict[str, Any]:
     return {
         "active": store["active"],
         "fallback": store["fallback"],
+        "fast": store["fast"],
         "profiles": safe_profiles,
     }
 
@@ -304,6 +333,8 @@ def format_profiles_list(env_path: Path | None = None) -> str:
             tags.append("active")
         if name == store["fallback"]:
             tags.append("fallback")
+        if name == store["fast"]:
+            tags.append("fast")
         tag_str = f" [{', '.join(tags)}]" if tags else ""
         base = f" @ {prof['base_url']}" if prof.get("base_url") else ""
         lines.append(
@@ -313,7 +344,7 @@ def format_profiles_list(env_path: Path | None = None) -> str:
 
 
 def handle_profile_command(h, args: list[str]) -> str:
-    """Handle `/profile [list|save <name>|use <name>|fallback <name|none>|delete <name>]`."""
+    """Handle `/profile [list|save <name>|use <name>|fallback <name|none>|fast <name|none>|delete <name>]`."""
     env_path = default_env_path()
     if not args or args[0] == "list":
         return format_profiles_list(env_path)
@@ -352,6 +383,18 @@ def handle_profile_command(h, args: list[str]) -> str:
             else "Fallback profile cleared."
         )
 
+    if sub == "fast":
+        if not rest:
+            store = load_profiles(env_path)
+            fp = store.get("fast") or "(none)"
+            return f"Current fast routing profile: {fp}\nUsage: /profile fast <name|none>"
+        store = set_fast_profile(rest, env_path=env_path)
+        return (
+            f"Fast routing profile set to `{store['fast']}`."
+            if store["fast"]
+            else "Fast routing profile cleared."
+        )
+
     if sub in {"delete", "rm", "remove"}:
         if not rest:
             raise ValueError("Usage: /profile delete <name>")
@@ -359,5 +402,5 @@ def handle_profile_command(h, args: list[str]) -> str:
         return f"Deleted profile `{rest}`."
 
     raise ValueError(
-        "Usage: /profile [list|save <name>|use <name>|fallback <name|none>|delete <name>]"
+        "Usage: /profile [list|save <name>|use <name>|fallback <name|none>|fast <name|none>|delete <name>]"
     )

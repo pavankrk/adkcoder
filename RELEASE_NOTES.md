@@ -1,5 +1,54 @@
 # ADK Coder Release Notes
 
+## v2.2.0 — Power-User IDE, Auto-Verify, Persistent Memory, Smart Routing & API Tester
+
+**Branch:** `v2.2` | **Tests:** 94 passed (`pytest`), `ruff` clean, JS syntax verified (`node --check`)
+
+### Highlights
+
+#### 1. Command Palette (`⌘K` / `Ctrl+K`), Inline File Editor & Per-Hunk Diff Review
+- **Command Palette (`⌘K` / `Ctrl+K`)**: Instant fuzzy search with keyboard navigation (`↑`/`↓`/`Enter`/`Esc`) across quick actions, drawers, workspaces, saved LLM profiles, slash commands, and workspace files.
+- **Editable Files Drawer**: Click **✎ Edit** on any open file in the Files drawer to edit inline with a monospace editor and save directly (`⌘S` / `Ctrl+S` via `POST /api/file/save`). Every save records an undo snapshot so **Undo Last Edit** can revert manual edits too.
+- **Per-Hunk Diff Accept / Reject**: The Git Diff drawer splits every modified file into individual `@@` hunks (`GET /api/diff` → `hunks[]`) with per-hunk **Revert Hunk** buttons (`POST /api/git/revert-hunk`) alongside **Revert File**, letting you selectively discard one change while keeping the rest of the file intact.
+
+#### 2. Auto-Verify Loop & Persistent Project Memory (`.agent/MEMORY.md`)
+- **Auto-Verify Toggle (`✓ Auto-Verify`)**: One-click toggle in the composer bar (`POST /api/auto-verify`, persisted per workspace). Whenever the agent edits code, ADK Coder automatically runs your configured (or auto-detected) test suite and—if tests fail—runs an automatic self-fix pass and re-verifies, rendering a live pass/fixed/fail badge right on the turn card.
+- **Persistent Project Memory (`🧠 Project Memory`)**: Sidebar modal (`GET/POST /api/memory`) to add, delete, or edit durable project conventions in `.agent/MEMORY.md`. Automatically injected into every chat session alongside `AGENTS.md`, `CLAUDE.md`, and `.agent/RULES.md`.
+
+#### 3. Smart Dual-Model Routing & Corporate CA / Proxy Settings UI
+- **Fast Profile Routing**: Designate a dedicated **Fast** profile in **Customizations → Provider & Profiles** (`POST /api/profiles/fast` or `/profile fast <name|none>`) so background tasks like context compaction (`/compact`), commit message drafting (`/commit`), and log triage automatically route to a fast/cheap model while coding stays on your primary model—safely restoring primary credentials in `os.environ` after each fast call.
+- **Network & Certificates Tab**: New **Customizations → Network & Certificates** tab (`GET/POST /api/network`) to configure corporate TLS CA bundles (`SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE`) and proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) with live file existence verification, `.env` persistence, and automatic adoption by `_ssl_context()` (used by Test Connection and the REST Tester).
+
+#### 4. Interactive API / REST Tester Drawer & One-Click Session Export
+- **Interactive API / REST Tester (`🌐`)**: Auto-populates clickable route chips from your codebase (`GET /api/rest/routes` via `diagram.analyze_structure` for FastAPI, Flask, Spring, Express, and Go), executes live HTTP requests (`POST /api/rest/send`) with custom headers/JSON body, displays status/latency/pretty-printed JSON, copies ready-to-run `curl` commands, and provides a 1-click **Send Error to `/debug`** button whenever an endpoint returns an error (`4xx`/`5xx` or connection error).
+- **One-Click Session Export (`⬇`)**: Top-bar button (`GET /api/session/export`) downloads the active conversation transcript (including workspace/branch/model metadata, tasks, step summaries, and Auto-Verify status) as `<workspace>_<session>.md` and copies it to your clipboard.
+
+### Install & Update (`v2.2.0`)
+
+**macOS / Linux:**
+```bash
+# Clickable native app:
+./scripts/build-macos-app.sh && open "dist/ADK Coder.app"
+
+# Or from terminal:
+./scripts/run-desktop.sh
+```
+
+**Windows (PowerShell / `cmd.exe`):**
+```powershell
+# Direct with npx using the bundled tarball:
+npx --package .\adk-coder-2.2.0.tgz adk-coder-app
+
+# Install or update globally via npm (auto-updates wheel on next launch):
+npm install -g .\adk-coder-2.2.0.tgz
+adk-coder-app
+
+# Or install/update in place via PowerShell installer:
+.\install.ps1 -Wheel .\adk_coder-2.2.0-py3-none-any.whl
+```
+
+---
+
 ## v2.1.0 — Native Desktop Agent IDE & Developer Productivity Release
 
 **Branch:** `adk-coder-v2.1` | **Tests:** 92 passed (`pytest`), `ruff` clean

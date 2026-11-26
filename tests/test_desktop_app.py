@@ -40,7 +40,7 @@ def test_desktop_routes_bootstrap_files_sessions_terminal_and_inspector(tmp_path
     assert st == 200
     boot = json.loads(raw)
     assert boot["workspace_name"] == "demo_repo"
-    assert boot["version"] == "2.1.0"
+    assert boot["version"] == "2.2.0"
     assert boot["workspaces"][0]["name"] == "demo_repo"
 
     st, _, files_raw = dispatch_desktop_request(ctrl, "GET", "/api/files", {})
@@ -555,3 +555,245 @@ def test_desktop_v21_sessions_queue_image_terminal_watch_git_checkpoints_context
         "watchPill",
     ):
         assert marker in html
+
+
+def test_desktop_v22_file_save_per_hunk_revert_memory_network_rest_and_export(tmp_path, monkeypatch):
+    import asyncio
+    import io
+    import os
+    import subprocess
+    import urllib.error
+    import urllib.request
+
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    env_file = tmp_path / ".env"
+    monkeypatch.setenv("ADK_CODER_ENV_FILE", str(env_file))
+
+    ws = tmp_path / "v22_repo"
+    ws.mkdir()
+    lines = [f"line_{i} = {i}" for i in range(1, 25)]
+    (ws / "multi.py").write_text("\n".join(lines) + "\n", encoding="utf8")
+    (ws / "routes.py").write_text('@app.get("/api/ping")\ndef ping(): return {"ok": True}\n', encoding="utf8")
+
+    subprocess.run(["git", "init"], cwd=ws, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=ws, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=ws, check=True)
+    subprocess.run(["git", "add", "."], cwd=ws, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=ws, check=True, capture_output=True)
+
+    ctrl = DesktopController(env_file, ws)
+
+    # 1. Editable Files Drawer (/api/file/save) + undo support
+    st, _, save_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/file/save", {"path": "routes.py", "content": '@app.get("/api/ping")\ndef ping(): return {"ok": 2}\n'}
+    )
+    save_data = json.loads(save_raw)
+    assert st == 200 and save_data["ok"] is True and save_data["state"]["edits_count"] >= 1
+    assert '{"ok": 2}' in (ws / "routes.py").read_text(encoding="utf8")
+    st, _, _undo_raw = dispatch_desktop_request(ctrl, "POST", "/api/checkpoint/undo", {"count": 1})
+    assert st == 200 and '{"ok": True}' in (ws / "routes.py").read_text(encoding="utf8")
+
+    # 2. Per-Hunk Diff Review & Revert (/api/diff hunks + /api/git/revert-hunk)
+    edited_lines = list(lines)
+    edited_lines[1] = "line_2 = 222"   # hunk 0 (near top)
+    edited_lines[21] = "line_22 = 999"  # hunk 1 (near bottom, separated by >10 unchanged lines)
+    (ws / "multi.py").write_text("\n".join(edited_lines) + "\n", encoding="utf8")
+
+    st, _, diff_raw = dispatch_desktop_request(ctrl, "GET", "/api/diff", {})
+    diff_data = json.loads(diff_raw)
+    multi_entry = next(f for f in diff_data["files"] if f["path"] == "multi.py")
+    assert st == 200 and len(multi_entry["hunks"]) == 2
+
+    # Revert ONLY hunk 0 (line_2); hunk 1 (line_22 = 999) MUST remain!
+    st, _, rh_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/git/revert-hunk", {"path": "multi.py", "hunk_index": 0}
+    )
+    assert st == 200 and json.loads(rh_raw)["ok"] is True
+    after_hunk_revert = (ws / "multi.py").read_text(encoding="utf8")
+    assert "line_2 = 2\n" in after_hunk_revert
+    assert "line_22 = 999\n" in after_hunk_revert
+
+    # 3. Persistent Project Memory (.agent/MEMORY.md)
+    st, _, mem_add_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/memory", {"add_rule": "Always use Pydantic v2 models"}
+    )
+    mem_add = json.loads(mem_add_raw)
+    assert st == 200 and mem_add["count"] == 1 and mem_add["state"]["memory_count"] == 1
+    h = ctrl.get_harness()
+    rule_sources, rule_text = h.load_project_rules()
+    assert ".agent/MEMORY.md" in rule_sources
+    assert "Always use Pydantic v2 models" in rule_text
+
+    st, _, mem_rm_raw = dispatch_desktop_request(ctrl, "POST", "/api/memory", {"remove_index": 0})
+    assert st == 200 and json.loads(mem_rm_raw)["count"] == 0
+
+    # 4. Corporate CA / Proxy Settings (/api/network)
+    ca_file = tmp_path / "corp-ca.pem"
+    ca_file.write_text("-----BEGIN CERTIFICATE-----\nFAKE\n-----END CERTIFICATE-----\n", encoding="utf8")
+    st, _, net_raw = dispatch_desktop_request(
+        ctrl,
+        "POST",
+        "/api/network",
+        {
+            "ssl_cert_file": str(ca_file),
+            "http_proxy": "http://proxy.corp:8080",
+            "https_proxy": "http://proxy.corp:8080",
+            "no_proxy": "localhost,127.0.0.1",
+        },
+    )
+    net_data = json.loads(net_raw)
+    assert st == 200 and net_data["ca_exists"] is True
+    assert os.environ["SSL_CERT_FILE"] == str(ca_file.resolve())
+    assert os.environ["HTTP_PROXY"] == "http://proxy.corp:8080"
+
+    st, _, net_get_raw = dispatch_desktop_request(ctrl, "GET", "/api/network", {})
+    assert st == 200 and json.loads(net_get_raw)["https_proxy"] == "http://proxy.corp:8080"
+
+    # Clear custom CA/proxy settings
+    st, _, _ = dispatch_desktop_request(
+        ctrl, "POST", "/api/network", {"ssl_cert_file": "", "http_proxy": "", "https_proxy": "", "no_proxy": ""}
+    )
+    assert st == 200 and "SSL_CERT_FILE" not in os.environ
+
+    # 5. Smart Dual-Model Fast Profile Routing (/api/profiles/fast + harness.ask(fast=True))
+    dispatch_desktop_request(
+        ctrl,
+        "POST",
+        "/api/profiles/save",
+        {"name": "PrimaryProf", "provider": "openai-compatible", "model": "big-coder", "base_url": "http://127.0.0.1:9001/v1"},
+    )
+    dispatch_desktop_request(
+        ctrl,
+        "POST",
+        "/api/profiles/save",
+        {"name": "FastProf", "provider": "openai-compatible", "model": "mini-fast", "base_url": "http://127.0.0.1:9002/v1"},
+    )
+    dispatch_desktop_request(ctrl, "POST", "/api/profiles/use", {"name": "PrimaryProf", "workspace": str(ws)})
+    st, _, fast_raw = dispatch_desktop_request(ctrl, "POST", "/api/profiles/fast", {"name": "FastProf"})
+    assert st == 200 and json.loads(fast_raw)["fast"] == "FastProf"
+
+    seen_calls: list[tuple[str, str | None]] = []
+
+    async def capture_generate(model, instruction, prompt, tools=(), **kwargs):
+        seen_calls.append((model, kwargs.get("api_base")))
+        return "ok"
+
+    monkeypatch.setattr(harness_mod, "generate", capture_generate)
+    h = ctrl.get_harness()
+    asyncio.run(h.ask("summarize", "hello", fast=True))
+    asyncio.run(h.ask("code", "hello", fast=False))
+    assert seen_calls[0] == ("openai/mini-fast", "http://127.0.0.1:9002/v1")
+    assert seen_calls[1] == ("openai/big-coder", "http://127.0.0.1:9001/v1")
+    assert os.environ.get("OPENAI_API_BASE") == "http://127.0.0.1:9001/v1"
+
+    # 6. Interactive API / REST Tester (/api/rest/routes + /api/rest/send)
+    st, _, rroutes_raw = dispatch_desktop_request(ctrl, "GET", "/api/rest/routes", {})
+    assert st == 200 and any(r["path"] == "/api/ping" for r in json.loads(rroutes_raw)["routes"])
+
+    class _FakeResp:
+        def __init__(self, status: int, body: bytes):
+            self.status = status
+            self.reason = "OK"
+            self.headers = {"Content-Type": "application/json"}
+            self._body = body
+
+        def read(self, _n: int = -1) -> bytes:
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    def fake_urlopen(req, timeout=30.0, context=None):
+        if req.full_url.endswith("/api/ping"):
+            return _FakeResp(200, json.dumps({"pong": True}).encode())
+        raise urllib.error.HTTPError(
+            req.full_url, 500, "Internal Server Error", {}, io.BytesIO(json.dumps({"detail": "boom"}).encode())
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    st, _, ok_resp_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/rest/send", {"method": "GET", "url": "http://127.0.0.1:8000/api/ping"}
+    )
+    ok_resp = json.loads(ok_resp_raw)
+    assert st == 200 and ok_resp["ok"] is True and ok_resp["status"] == 200
+    assert '"pong": true' in ok_resp["body"] and "curl" in ok_resp["curl"]
+
+    st, _, err_resp_raw = dispatch_desktop_request(
+        ctrl, "POST", "/api/rest/send", {"method": "GET", "url": "http://127.0.0.1:8000/fail"}
+    )
+    err_resp = json.loads(err_resp_raw)
+    assert st == 200 and err_resp["ok"] is False and err_resp["status"] == 500
+    assert "boom" in err_resp["body"]
+
+    # 7. Session Export (.md)
+    h._save_history([{"role": "user", "text": "Build health route"}, {"role": "model", "text": "Done!"}])
+    st, _, exp_raw = dispatch_desktop_request(ctrl, "GET", "/api/session/export", {})
+    exp = json.loads(exp_raw)
+    assert st == 200 and exp["ok"] is True and exp["filename"].endswith(".md")
+    assert "Build health route" in exp["markdown"] and "Done!" in exp["markdown"]
+
+    # 8. Verify v2.2 UI markers in app.html
+    html = load_desktop_html()
+    for marker in (
+        "openCommandPalette",
+        "openMemoryModal",
+        "exportSessionMarkdown",
+        "autoVerifyBtn",
+        "pFastSel",
+        "netCaInput",
+        "data-revert-hunk-path",
+        "fileEditorTa",
+        "restSendBtn",
+        "restDebugBtn",
+    ):
+        assert marker in html
+
+
+def test_desktop_v22_auto_verify_pass_and_self_fix(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    ws = tmp_path / "av_repo"
+    ws.mkdir()
+    (ws / "calc.py").write_text("VALUE = 0\n", encoding="utf8")
+
+    ctrl = DesktopController(env_file, ws)
+    h = ctrl.get_harness()
+    h.set_mode("full-auto")
+    # Configure test command: passes only when calc.py contains VALUE = 42
+    h.config["test_command"] = f'"{sys.executable}" -c "import calc; assert calc.VALUE == 42"'
+    h.write("config.json", json.dumps(h.config, indent=2) + "\n")
+
+    st, _, av_raw = dispatch_desktop_request(ctrl, "POST", "/api/auto-verify", {"enabled": True})
+    assert st == 200 and json.loads(av_raw)["auto_verify"] is True
+
+    q = ctrl.subscribe()
+    call_num = {"n": 0}
+
+    async def fake_generate(model, instruction, prompt, tools=(), **kwargs):
+        call_num["n"] += 1
+        if call_num["n"] == 1:
+            # First edit introduces a bug (VALUE = 7) -> Auto-Verify fails -> triggers self-fix!
+            h.tools.write_file("calc.py", "VALUE = 7\n")
+            return "Updated calc.py"
+        # Self-fix pass corrects VALUE = 42 -> Auto-Verify re-runs and passes!
+        h.tools.write_file("calc.py", "VALUE = 42\n")
+        return "Fixed calc.py to 42"
+
+    monkeypatch.setattr(harness_mod, "generate", fake_generate)
+
+    st, _, _ = dispatch_desktop_request(ctrl, "POST", "/api/chat/send", {"message": "set calc value"})
+    assert st == 200
+
+    done_ev = None
+    for _ in range(30):
+        ev = q.get(timeout=8)
+        if ev["type"] == "turn_done":
+            done_ev = ev
+            break
+    assert done_ev is not None
+    assert done_ev["auto_verify"]["status"] == "fixed"
+    assert done_ev["auto_verify"]["attempts"] == 2
+    assert "VALUE = 42" in (ws / "calc.py").read_text(encoding="utf8")
+    assert done_ev["state"]["history"][-1]["auto_verify"]["status"] == "fixed"

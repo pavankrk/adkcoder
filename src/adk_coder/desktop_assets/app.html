@@ -422,6 +422,64 @@
   .toast.show { display: block; }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--focus); border-radius: 50%; animation: spin 0.7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* v2.2 Command Palette, Auto-Verify, Per-Hunk Diff, File Editor & REST Tester */
+  .palette-bg {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.42); z-index: 65;
+    display: none; align-items: flex-start; justify-content: center; padding-top: 11vh;
+  }
+  .palette-bg.open { display: flex; }
+  .palette-box {
+    width: min(620px, 94vw); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: 0 20px 56px rgba(0,0,0,0.28); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .palette-input {
+    width: 100%; border: none; border-bottom: 1px solid var(--border);
+    background: var(--surface); color: var(--text); padding: 13px 16px;
+    font: inherit; font-size: 14px; outline: none;
+  }
+  .palette-list { max-height: 360px; overflow-y: auto; padding: 6px; }
+  .palette-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 11px; border-radius: 8px; cursor: pointer; font-size: 12.5px;
+  }
+  .palette-item:hover, .palette-item.sel { background: var(--active); }
+  .palette-cat { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .av-pill {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+    border-radius: 999px; border: 1px solid var(--border); background: transparent;
+    color: var(--muted); font: inherit; font-size: 11.5px; cursor: pointer;
+  }
+  .av-pill:hover { background: var(--hover); color: var(--text); }
+  .av-pill.on { background: var(--green-bg); color: var(--green); border-color: transparent; font-weight: 600; }
+  .av-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 10px; border-radius: 8px; font-size: 12px; border: 1px solid var(--border);
+    background: var(--sidebar);
+  }
+  .av-banner.pass { background: var(--green-bg); color: var(--green); border-color: transparent; }
+  .av-banner.fail { background: var(--red-bg); color: var(--red); border-color: transparent; }
+  .av-banner.run { background: var(--active); color: var(--focus); border-color: transparent; }
+  .hunk-card { border-top: 1px solid var(--border); }
+  .hunk-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 4px 10px; background: var(--hover); font-family: var(--mono); font-size: 11px; color: var(--muted);
+  }
+  .file-editor-ta {
+    width: 100%; min-height: 360px; max-height: 520px; border: none; outline: none; resize: vertical;
+    padding: 10px 12px; background: var(--code-bg); color: var(--text);
+    font-family: var(--mono); font-size: 12px; line-height: 1.5; tab-size: 2;
+  }
+  .rest-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); font-family: var(--mono); font-size: 11px; cursor: pointer;
+  }
+  .rest-chip:hover { border-color: var(--focus); background: var(--active); }
+  .rest-status { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+  .rest-status.ok { background: var(--green-bg); color: var(--green); }
+  .rest-status.err { background: var(--red-bg); color: var(--red); }
 </style>
 </head>
 <body>
@@ -431,7 +489,7 @@
     <div class="top-left">
       <button id="toggleSidebarBtn" class="icon-btn" title="Toggle sidebar">☰</button>
       <span style="font-weight:600; font-size:13.5px;">ADK Coder</span>
-      <span id="versionTag" style="font-size:11px; color:var(--muted);">v2.1.0</span>
+      <span id="versionTag" style="font-size:11px; color:var(--muted);">v2.2.0</span>
     </div>
     <div class="top-center">
       <div id="wsPill" class="ws-pill" title="Click to switch or open workspace">
@@ -439,14 +497,17 @@
         <span id="wsPillName">workspace</span>
         <span id="wsPillBranch" class="branch-tag"></span>
       </div>
+      <button id="cmdPaletteBtn" class="watch-pill" title="Open Command Palette (⌘K / Ctrl+K)">⌘K</button>
       <button id="runTestBtn" class="icon-btn" title="Open streaming terminal">▶</button>
       <button id="watchPill" class="watch-pill" title="Toggle real-time test watcher">👁 Watch</button>
       <button id="openCodeBtn" class="icon-btn" title="Open workspace folder">↗</button>
     </div>
     <div class="top-right">
+      <button id="exportSessBtn" class="icon-btn" title="Export Session as Markdown (.md)">⬇</button>
       <button id="themeToggleBtn" class="icon-btn" title="Switch theme (Light / Dark / System)">☀</button>
-      <button class="icon-btn" data-open-drawer="files" title="Files">📄</button>
-      <button class="icon-btn" data-open-drawer="diff" title="Git Diff & Commit">±</button>
+      <button class="icon-btn" data-open-drawer="files" title="Files (View & Edit)">📄</button>
+      <button class="icon-btn" data-open-drawer="diff" title="Git Diff, Hunks & Commit">±</button>
+      <button class="icon-btn" data-open-drawer="rest" title="Interactive API / REST Tester">🌐</button>
       <button class="icon-btn" data-open-drawer="inspector" title="Inspector: Security / Diagram / SBOM / Checkpoints">🛡</button>
       <button class="icon-btn" data-open-drawer="terminal" title="Streaming Terminal & Watch">❯_</button>
     </div>
@@ -459,6 +520,7 @@
       <div class="side-top">
         <button id="newSessionBtn" class="side-item"><span>＋ New Session</span><span class="kbd">⌘N</span></button>
         <button id="automationsBtn" class="side-item"><span>⚡ Automations &amp; Scaffold</span></button>
+        <button id="memoryBtn" class="side-item"><span>🧠 Project Memory</span><span id="memoryCountBadge" class="kbd">0</span></button>
         <button id="customizationsBtn" class="side-item"><span>⚙ Customizations</span></button>
       </div>
       <div class="side-sec-head">
@@ -477,8 +539,9 @@
     <!-- Center Chat Stage -->
     <section class="stage">
       <div class="right-dock">
-        <button class="icon-btn" data-open-drawer="files" title="Files">📄</button>
-        <button class="icon-btn" data-open-drawer="diff" title="Git Diff & Commit">±</button>
+        <button class="icon-btn" data-open-drawer="files" title="Files (View & Edit)">📄</button>
+        <button class="icon-btn" data-open-drawer="diff" title="Git Diff & Hunks">±</button>
+        <button class="icon-btn" data-open-drawer="rest" title="API / REST Tester">🌐</button>
         <button class="icon-btn" data-open-drawer="inspector" title="Inspector">🛡</button>
         <button class="icon-btn" data-open-drawer="terminal" title="Terminal & Watch">❯_</button>
       </div>
@@ -504,6 +567,7 @@
                   <option value="full-auto">Full Auto</option>
                 </select>
                 <select id="profileSelect" class="mini-select" title="Switch LLM profile"></select>
+                <button id="autoVerifyBtn" type="button" class="av-pill" title="Auto-Verify: run tests after code edits and self-fix once on failure">✓ Auto-Verify</button>
               </div>
               <div class="bar-right">
                 <span id="modelLabel" style="font-size:11.5px; color:var(--muted);"></span>
@@ -539,6 +603,14 @@
   </div>
 </div>
 
+<!-- Command Palette (⌘K) -->
+<div id="paletteBg" class="palette-bg">
+  <div class="palette-box">
+    <input id="paletteInput" class="palette-input" placeholder="Type a command, action, workspace, profile, or file... (Esc to close)" />
+    <div id="paletteList" class="palette-list"></div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <script>
@@ -557,6 +629,17 @@ let acIndex = 0;
 let acMode = null; // 'cmd' | 'file'
 let sessionFilterQuery = '';
 let mermaidRegistry = [];
+let currentPreviewFile = { path: '', content: '', editing: false };
+let restState = {
+  baseUrl: 'http://127.0.0.1:8000',
+  method: 'GET',
+  path: '/health',
+  headers: '{\n  "Accept": "application/json"\n}',
+  body: '',
+  lastResp: null,
+};
+let paletteItems = [];
+let paletteIdx = 0;
 
 /* ---- Theme Management ---- */
 const THEME_MODES = ['system', 'light', 'dark'];
@@ -973,6 +1056,15 @@ function renderTopAndSidebar() {
   renderWatchPill(appState.watch);
   renderChipsAndQueue();
 
+  const avBtn = document.getElementById('autoVerifyBtn');
+  if (avBtn) {
+    const avOn = !!appState.auto_verify;
+    avBtn.className = 'av-pill' + (avOn ? ' on' : '');
+    avBtn.textContent = avOn ? '✓ Auto-Verify: On' : '✓ Auto-Verify';
+  }
+  const memBadge = document.getElementById('memoryCountBadge');
+  if (memBadge) memBadge.textContent = String(appState.memory_count || 0);
+
   const isBusy = !!(appState.busy || liveTurn);
   const sendBtn = document.getElementById('sendBtn');
   const queueBtn = document.getElementById('queueBtn');
@@ -1188,6 +1280,22 @@ function renderDebugStepper(dp) {
   return `<div class="debug-stepper">${pills}${reportBtn}</div>`;
 }
 
+function renderAutoVerifyBadge(av) {
+  if (!av || !av.status) return '';
+  const st = av.status;
+  const cmd = esc(av.command || '');
+  if (st === 'running' || st === 'fixing') {
+    const label = st === 'fixing' ? `Auto-Verify failed — self-fixing & re-running \`${cmd}\`...` : `Auto-Verify running \`${cmd}\`...`;
+    return `<div class="av-banner run"><span><span class="spinner"></span> ${label}</span></div>`;
+  }
+  if (st === 'pass' || st === 'fixed') {
+    const label = st === 'fixed' ? `✓ Auto-Verify passed after self-fix (${cmd})` : `✓ Auto-Verify passed (${cmd})`;
+    return `<div class="av-banner pass"><span>${label}</span></div>`;
+  }
+  const outSnippet = av.output ? `<pre class="step-shell" style="margin-top:6px;max-height:130px;">${esc(av.output.slice(-1500))}</pre>` : '';
+  return `<details class="step-card"><summary class="av-banner fail" style="border-radius:0;cursor:pointer;"><span>✕ Auto-Verify failed (${cmd})</span><span style="font-size:11px;">Inspect output</span></summary>${outSnippet}</details>`;
+}
+
 function renderChat() {
   if (!appState) return;
   mermaidRegistry = [];
@@ -1225,9 +1333,11 @@ function renderChat() {
       const histStepsHtml = Array.isArray(turn.steps) && turn.steps.length
         ? renderStepsGroup(turn.steps, { live: false, elapsed_s: turn.elapsed_s })
         : '';
+      const avHtml = renderAutoVerifyBadge(turn.auto_verify);
       html += `<div class="msg-agent">
         ${histStepsHtml}
         <div class="md-body">${renderMarkdown(turn.text)}</div>
+        ${avHtml}
         <div class="agent-footer">
           <button class="icon-btn" style="width:24px;height:24px;" data-copy-turn="${idx}" title="Copy">📋</button>
           <span>${esc(appState.model)}</span>
@@ -1273,6 +1383,7 @@ function renderChat() {
       ${thoughtHtml}
       ${approvalHtml}
       ${liveTurn.text ? `<div class="md-body">${renderMarkdown(liveTurn.text)}</div>` : ''}
+      ${renderAutoVerifyBadge(liveTurn.autoVerify)}
     </div>`;
   }
 
@@ -1372,6 +1483,7 @@ function startTurnPoller() {
       if (st.thought && st.thought.length > (liveTurn.thought || '').length) { liveTurn.thought = st.thought; changed = true; }
       if (Array.isArray(st.steps) && JSON.stringify(st.steps) !== JSON.stringify(liveTurn.steps)) { liveTurn.steps = st.steps; changed = true; }
       if (st.debug_pipeline && JSON.stringify(st.debug_pipeline) !== JSON.stringify(liveTurn.debugPipeline)) { liveTurn.debugPipeline = st.debug_pipeline; changed = true; }
+      if (st.auto_verify && JSON.stringify(st.auto_verify) !== JSON.stringify(liveTurn.autoVerify)) { liveTurn.autoVerify = st.auto_verify; changed = true; }
       if (st.pending_approval && (!pendingApproval || pendingApproval.id !== st.pending_approval.id)) { pendingApproval = st.pending_approval; changed = true; }
       if (appState && Array.isArray(st.queued_messages)) { appState.queued_messages = st.queued_messages; renderChipsAndQueue(); }
       if (changed) renderChat();
@@ -1425,6 +1537,7 @@ async function sendMessage(overrideText) {
     steps: [],
     thought: '',
     text: '',
+    autoVerify: null,
     debugPipeline: msg.toLowerCase().startsWith('/debug')
       ? { active: true, stage: 0, stages: ['Log Analyst', 'Root Cause', 'Fix Engineer', 'Verifier'], report_exists: false }
       : null,
@@ -1535,18 +1648,44 @@ async function uploadImageFile(file) {
 }
 
 /* ---- Right Drawers ---- */
+function setFileDrawerEditMode(editing) {
+  currentPreviewFile.editing = editing;
+  const pre = document.getElementById('filePreview');
+  const ta = document.getElementById('fileEditorTa');
+  const editBtn = document.getElementById('editFileDrawerBtn');
+  const saveBtn = document.getElementById('saveFileDrawerBtn');
+  const cancelBtn = document.getElementById('cancelFileDrawerBtn');
+  if (!pre || !ta) return;
+  if (editing) {
+    ta.value = currentPreviewFile.content || '';
+    pre.style.display = 'none';
+    ta.style.display = 'block';
+    if (editBtn) editBtn.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = 'inline-block';
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+    ta.focus();
+  } else {
+    pre.innerHTML = highlightCodeBlock(currentPreviewFile.content || '', true);
+    pre.style.display = 'block';
+    ta.style.display = 'none';
+    if (editBtn) editBtn.style.display = 'inline-block';
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+  }
+}
+
 async function openFileInDrawer(fp) {
   await loadDrawer('files');
   try {
     const r = await apiGet(`/api/file?workspace=${encodeURIComponent(appState.workspace)}&path=${encodeURIComponent(fp)}`);
     const box = document.getElementById('filePreviewBox');
-    const pre = document.getElementById('filePreview');
     const lbl = document.getElementById('filePreviewPath');
-    if (box && pre && lbl) {
+    if (box && lbl) {
+      currentPreviewFile = { path: fp, content: r.content || '', editing: false };
       box.style.display = 'block';
       lbl.textContent = fp;
       lbl.dataset.path = fp;
-      pre.innerHTML = highlightCodeBlock(r.content || '', true);
+      setFileDrawerEditMode(false);
       box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   } catch (err) { showToast('Could not open file: ' + err.message, true); }
@@ -1566,17 +1705,45 @@ async function loadDrawer(kind) {
   const ws = appState.workspace;
 
   if (kind === 'files') {
-    title.textContent = 'Workspace Files';
+    title.textContent = 'Workspace Files (View & Edit)';
     const d = await apiGet('/api/files?workspace=' + encodeURIComponent(ws));
     body.innerHTML = `<input id="fileFilter" placeholder="Filter files..." style="width:100%;padding:6px 9px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;margin-bottom:8px;" />
-      <div id="fileList" style="max-height:240px;overflow-y:auto;"></div>
+      <div id="fileList" style="max-height:220px;overflow-y:auto;"></div>
       <div id="filePreviewBox" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--surface);border-bottom:1px solid var(--border);font-size:11.5px;">
-          <strong id="filePreviewPath" style="font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;"></strong>
-          <button type="button" id="pinFileDrawerBtn" class="btn sm">📌 Pin</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 10px;background:var(--surface);border-bottom:1px solid var(--border);font-size:11.5px;">
+          <strong id="filePreviewPath" style="font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></strong>
+          <div style="display:flex;gap:4px;flex-shrink:0;">
+            <button type="button" id="editFileDrawerBtn" class="btn sm">✎ Edit</button>
+            <button type="button" id="saveFileDrawerBtn" class="btn sm primary" style="display:none;">Save (⌘S)</button>
+            <button type="button" id="cancelFileDrawerBtn" class="btn sm" style="display:none;">Cancel</button>
+            <button type="button" id="pinFileDrawerBtn" class="btn sm">📌 Pin</button>
+          </div>
         </div>
-        <pre id="filePreview" class="step-code" style="max-height:380px;border-top:none;"></pre>
+        <pre id="filePreview" class="step-code" style="max-height:420px;border-top:none;"></pre>
+        <textarea id="fileEditorTa" class="file-editor-ta" style="display:none;" spellcheck="false"></textarea>
       </div>`;
+    const saveCurrentFile = async () => {
+      const fp = currentPreviewFile.path;
+      const ta = document.getElementById('fileEditorTa');
+      if (!fp || !ta) return;
+      try {
+        const r = await apiPost('/api/file/save', { workspace: ws, path: fp, content: ta.value });
+        currentPreviewFile.content = ta.value;
+        if (r.state) appState = r.state;
+        setFileDrawerEditMode(false);
+        renderTopAndSidebar();
+        showToast(`Saved ${fp} (undoable)`);
+      } catch (err) { showToast('Save failed: ' + err.message, true); }
+    };
+    document.getElementById('editFileDrawerBtn').onclick = () => setFileDrawerEditMode(true);
+    document.getElementById('cancelFileDrawerBtn').onclick = () => setFileDrawerEditMode(false);
+    document.getElementById('saveFileDrawerBtn').onclick = saveCurrentFile;
+    document.getElementById('fileEditorTa').addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveCurrentFile();
+      }
+    });
     document.getElementById('pinFileDrawerBtn').onclick = async () => {
       const fp = document.getElementById('filePreviewPath').dataset.path;
       if (!fp) return;
@@ -1598,25 +1765,41 @@ async function loadDrawer(kind) {
     document.getElementById('fileFilter').oninput = (e) => renderList(e.target.value);
 
   } else if (kind === 'diff') {
-    title.textContent = 'Git Diff & Commit';
+    title.textContent = 'Git Diff, Hunks & Commit';
     const d = await apiGet('/api/diff?workspace=' + encodeURIComponent(ws));
     const files = d.files || [];
+    const colorLines = (txt) => (txt || '').split('\n').map(ln => {
+      if (ln.startsWith('+') && !ln.startsWith('+++')) return `<span class="diff-line-add">${esc(ln)}</span>`;
+      if (ln.startsWith('-') && !ln.startsWith('---')) return `<span class="diff-line-del">${esc(ln)}</span>`;
+      return esc(ln) + '\n';
+    }).join('');
     const filesHtml = files.length
       ? files.map((f, idx) => {
-          const colored = (f.diff || '').split('\n').map(ln => {
-            if (ln.startsWith('+') && !ln.startsWith('+++')) return `<span class="diff-line-add">${esc(ln)}</span>`;
-            if (ln.startsWith('-') && !ln.startsWith('---')) return `<span class="diff-line-del">${esc(ln)}</span>`;
-            return esc(ln) + '\n';
-          }).join('');
+          const hunks = Array.isArray(f.hunks) ? f.hunks : [];
+          const bodyHtml = hunks.length
+            ? hunks.map(hk => {
+                const patchBody = (hk.patch || '').split('\n').slice(1).join('\n');
+                return `<div class="hunk-card">
+                  <div class="hunk-head">
+                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(hk.header || ('Hunk #' + (hk.index + 1)))}</span>
+                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                      <span class="diff-add">+${hk.added || 0}</span><span class="diff-del">-${hk.deleted || 0}</span>
+                      <button type="button" class="btn sm danger" data-revert-hunk-path="${esc(f.path)}" data-revert-hunk-idx="${hk.index}">Revert Hunk</button>
+                    </div>
+                  </div>
+                  <pre class="step-code" style="max-height:190px;border-top:none;">${colorLines(patchBody)}</pre>
+                </div>`;
+              }).join('')
+            : `<pre class="step-code" style="max-height:220px;">${colorLines(f.diff) || '(binary or empty diff)'}</pre>`;
           return `<details class="step-card" style="margin-bottom:8px;" ${idx === 0 ? 'open' : ''}>
             <summary class="step-card-head">
               <div class="step-card-left"><span class="badge">${esc(f.status)}</span><span class="step-card-path">${esc(f.path)}</span></div>
               <div class="step-card-right">
                 <span class="diff-add">+${f.added}</span><span class="diff-del">-${f.deleted}</span>
-                <button type="button" class="btn sm danger" data-revert-file="${esc(f.path)}">Revert</button>
+                <button type="button" class="btn sm danger" data-revert-file="${esc(f.path)}">Revert File</button>
               </div>
             </summary>
-            <pre class="step-code" style="max-height:220px;">${colored || '(binary or empty diff)'}</pre>
+            ${bodyHtml}
           </details>`;
         }).join('')
       : '<div style="font-size:12.5px;color:var(--muted);padding:12px 0;">No uncommitted changes.</div>';
@@ -1655,6 +1838,137 @@ async function loadDrawer(kind) {
         } catch (err) { showToast('Revert failed: ' + err.message, true); }
       };
     });
+    body.querySelectorAll('[data-revert-hunk-path]').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.preventDefault(); e.stopPropagation();
+        try {
+          const r = await apiPost('/api/git/revert-hunk', {
+            workspace: ws,
+            path: btn.dataset.revertHunkPath,
+            hunk_index: Number(btn.dataset.revertHunkIdx),
+          });
+          appState = r.state;
+          renderAll();
+          showToast(`Reverted hunk #${Number(btn.dataset.revertHunkIdx) + 1} in ${btn.dataset.revertHunkPath}`);
+        } catch (err) { showToast('Hunk revert failed: ' + err.message, true); }
+      };
+    });
+
+  } else if (kind === 'rest') {
+    title.textContent = 'Interactive API / REST Tester';
+    let routes = [];
+    try {
+      const rd = await apiGet('/api/rest/routes?workspace=' + encodeURIComponent(ws));
+      routes = rd.routes || [];
+    } catch (_) {}
+    const chipsHtml = routes.length
+      ? `<div style="margin-bottom:10px;">
+           <div style="font-size:11px;color:var(--muted);margin-bottom:5px;">Discovered Routes (${routes.length}) — click to populate:</div>
+           <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:92px;overflow-y:auto;">
+             ${routes.slice(0, 30).map((r, i) => `<button type="button" class="rest-chip" data-rest-route="${i}"><strong>${esc(r.method || 'GET')}</strong> ${esc(r.path || '/')}</button>`).join('')}
+           </div>
+         </div>`
+      : '';
+    body.innerHTML = `${chipsHtml}
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
+        <input id="restBaseInput" value="${esc(restState.baseUrl)}" placeholder="Base URL (e.g. http://127.0.0.1:8000)" style="width:100%;padding:6px 9px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;font-family:var(--mono);font-size:12px;" />
+        <div style="display:flex;gap:6px;">
+          <select id="restMethodSel" style="width:94px;padding:6px 7px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;font-family:var(--mono);font-size:12px;">
+            ${['GET','POST','PUT','PATCH','DELETE','HEAD'].map(m => `<option value="${m}" ${m===restState.method?'selected':''}>${m}</option>`).join('')}
+          </select>
+          <input id="restPathInput" value="${esc(restState.path)}" placeholder="/api/items or full https://... URL" style="flex:1;padding:6px 9px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;font-family:var(--mono);font-size:12px;" />
+        </div>
+        <details>
+          <summary style="font-size:12px;color:var(--muted);cursor:pointer;">Headers (JSON)</summary>
+          <textarea id="restHeadersTa" rows="3" style="width:100%;margin-top:5px;padding:6px 8px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;font-family:var(--mono);font-size:11.5px;">${esc(restState.headers)}</textarea>
+        </details>
+        <details ${['POST','PUT','PATCH'].includes(restState.method) ? 'open' : ''}>
+          <summary style="font-size:12px;color:var(--muted);cursor:pointer;">Request Body (JSON / Text)</summary>
+          <textarea id="restBodyTa" rows="4" placeholder='{"key": "value"}' style="width:100%;margin-top:5px;padding:6px 8px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;font-family:var(--mono);font-size:11.5px;">${esc(restState.body)}</textarea>
+        </details>
+        <div style="display:flex;gap:6px;">
+          <button type="button" id="restSendBtn" class="btn sm primary">Send Request</button>
+          <button type="button" id="restCurlBtn" class="btn sm">Copy curl</button>
+        </div>
+      </div>
+      <div id="restRespBox"></div>`;
+
+    const buildFullUrl = () => {
+      const p = document.getElementById('restPathInput').value.trim();
+      const b = document.getElementById('restBaseInput').value.trim().replace(/\/+$/, '');
+      if (p.startsWith('http://') || p.startsWith('https://')) return p;
+      return b + (p.startsWith('/') ? p : '/' + p);
+    };
+    const renderRestResp = (resp) => {
+      const box = document.getElementById('restRespBox');
+      if (!box) return;
+      if (!resp) { box.innerHTML = '<div style="font-size:12px;color:var(--muted);">Send a request to inspect status, headers, and response body.</div>'; return; }
+      const stLabel = resp.status ? `${resp.status} ${resp.reason || ''}`.trim() : 'Connection Error';
+      const debugBtn = !resp.ok
+        ? `<button type="button" id="restDebugBtn" class="btn sm danger">Send Error to /debug</button>`
+        : '';
+      const hdrRows = Object.entries(resp.headers || {}).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join('\n');
+      box.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span class="rest-status ${resp.ok ? 'ok' : 'err'}">${esc(stLabel)}</span>
+            <span style="font-size:11.5px;color:var(--muted);">${resp.latency_ms} ms · ${resp.size_bytes || 0} B</span>
+          </div>
+          ${debugBtn}
+        </div>
+        ${resp.error && !resp.body ? `<div class="status-note" style="color:var(--red);margin-bottom:8px;">${esc(resp.error)}</div>` : ''}
+        ${hdrRows ? `<details style="margin-bottom:6px;"><summary style="font-size:11.5px;color:var(--muted);cursor:pointer;">Response Headers</summary><pre class="step-code" style="max-height:140px;">${hdrRows}</pre></details>` : ''}
+        <pre class="step-code" style="max-height:340px;border:1px solid var(--border);border-radius:8px;"><code>${highlightCodeBlock(resp.body || '(empty response)', false)}</code></pre>`;
+      document.getElementById('restDebugBtn')?.addEventListener('click', () => {
+        const snippet = (resp.body || resp.error || '').replaceAll('"', "'").replaceAll('\n', ' ').slice(0, 900);
+        sendMessage(`/debug "API ${restState.method} ${buildFullUrl()} failed (${stLabel}): ${snippet}"`);
+      });
+    };
+    renderRestResp(restState.lastResp);
+
+    body.querySelectorAll('[data-rest-route]').forEach(btn => {
+      btn.onclick = () => {
+        const r = routes[Number(btn.dataset.restRoute)];
+        if (!r) return;
+        const m = String(r.method || 'GET').toUpperCase();
+        restState.method = ['GET','POST','PUT','PATCH','DELETE','HEAD'].includes(m) ? m : 'GET';
+        restState.path = r.path || '/';
+        document.getElementById('restMethodSel').value = restState.method;
+        document.getElementById('restPathInput').value = restState.path;
+      };
+    });
+    const sendRest = async () => {
+      restState.baseUrl = document.getElementById('restBaseInput').value.trim();
+      restState.method = document.getElementById('restMethodSel').value;
+      restState.path = document.getElementById('restPathInput').value.trim();
+      restState.headers = document.getElementById('restHeadersTa').value;
+      restState.body = document.getElementById('restBodyTa').value;
+      let parsedHeaders = {};
+      if (restState.headers.trim()) {
+        try { parsedHeaders = JSON.parse(restState.headers); }
+        catch (e) { showToast('Invalid Headers JSON: ' + e.message, true); return; }
+      }
+      const btn = document.getElementById('restSendBtn');
+      btn.disabled = true; btn.textContent = 'Sending...';
+      try {
+        const r = await apiPost('/api/rest/send', {
+          method: restState.method,
+          url: buildFullUrl(),
+          headers: parsedHeaders,
+          body: restState.body,
+        });
+        restState.lastResp = r;
+        renderRestResp(r);
+      } catch (err) { showToast('Request error: ' + err.message, true); }
+      finally { btn.disabled = false; btn.textContent = 'Send Request'; }
+    };
+    document.getElementById('restSendBtn').onclick = sendRest;
+    document.getElementById('restPathInput').onkeydown = (e) => { if (e.key === 'Enter') sendRest(); };
+    document.getElementById('restCurlBtn').onclick = () => {
+      const cmd = restState.lastResp?.curl || `curl -i -X ${document.getElementById('restMethodSel').value} '${buildFullUrl()}'`;
+      navigator.clipboard?.writeText(cmd);
+      showToast('Copied curl command');
+    };
 
   } else if (kind === 'inspector') {
     title.textContent = 'Inspector & Checkpoints';
@@ -1902,15 +2216,62 @@ function openRenameSessionModal(wsPath, sid, currentName) {
   setTimeout(() => document.getElementById('renSessInp')?.select(), 40);
 }
 
-/* ---- Customizations Modal (Tabbed: Provider & Profiles | Extensions) ---- */
+/* ---- Customizations Modal (Tabbed: Provider & Profiles | Network & CA | Extensions) ---- */
 async function openCustomizationsModal(activeTab = 'provider') {
   const modalBg = document.getElementById('modalBg');
   document.getElementById('modalTitle').textContent = 'Customizations';
   const body = document.getElementById('modalBody');
   const tabsHtml = `<div class="tab-bar">
     <button type="button" class="tab-btn ${activeTab === 'provider' ? 'active' : ''}" data-ctab="provider">Provider &amp; Profiles</button>
+    <button type="button" class="tab-btn ${activeTab === 'network' ? 'active' : ''}" data-ctab="network">Network &amp; Certificates</button>
     <button type="button" class="tab-btn ${activeTab === 'extensions' ? 'active' : ''}" data-ctab="extensions">Skills, Commands, Hooks &amp; MCP</button>
   </div>`;
+
+  if (activeTab === 'network') {
+    const net = await apiGet('/api/network');
+    const caBadge = net.ssl_cert_file
+      ? (net.ca_exists ? '<span class="badge ok">Found</span>' : '<span class="badge err">Not Found</span>')
+      : '<span class="badge">System Default</span>';
+    body.innerHTML = `${tabsHtml}
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:12px;">
+        Configure corporate TLS CA bundles (<code>SSL_CERT_FILE</code> / <code>REQUESTS_CA_BUNDLE</code>) and HTTP/HTTPS proxy servers. Settings are persisted to <code>${esc(net.env_path || '.env')}</code> and applied immediately.
+      </div>
+      <div class="form-grid">
+        <div class="field full">
+          <label>Corporate CA Bundle (.pem / .crt) ${caBadge}</label>
+          <input id="netCaInput" value="${esc(net.ssl_cert_file || '')}" placeholder="/path/to/corporate-ca-bundle.pem" />
+        </div>
+        <div class="field"><label>HTTP Proxy (HTTP_PROXY)</label><input id="netHttpProxy" value="${esc(net.http_proxy || '')}" placeholder="http://proxy.corp:8080" /></div>
+        <div class="field"><label>HTTPS Proxy (HTTPS_PROXY)</label><input id="netHttpsProxy" value="${esc(net.https_proxy || '')}" placeholder="http://proxy.corp:8080" /></div>
+        <div class="field full"><label>Bypass Proxy Hosts (NO_PROXY)</label><input id="netNoProxy" value="${esc(net.no_proxy || '')}" placeholder="localhost,127.0.0.1,.corp.internal" /></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button type="button" id="netSaveBtn" class="btn primary">Save Network Settings</button>
+        <button type="button" id="netClearBtn" class="btn">Clear All</button>
+      </div>
+      <div id="netStatus" class="status-note" style="display:none;"></div>`;
+    body.querySelectorAll('[data-ctab]').forEach(b => { b.onclick = () => openCustomizationsModal(b.dataset.ctab); });
+    const setNetNote = (txt) => { const el = document.getElementById('netStatus'); el.style.display = 'block'; el.textContent = txt; };
+    document.getElementById('netSaveBtn').onclick = async () => {
+      try {
+        await apiPost('/api/network', {
+          ssl_cert_file: document.getElementById('netCaInput').value.trim(),
+          http_proxy: document.getElementById('netHttpProxy').value.trim(),
+          https_proxy: document.getElementById('netHttpsProxy').value.trim(),
+          no_proxy: document.getElementById('netNoProxy').value.trim(),
+        });
+        showToast('Saved network & certificate settings');
+        await openCustomizationsModal('network');
+      } catch (err) { setNetNote('Error: ' + err.message); }
+    };
+    document.getElementById('netClearBtn').onclick = async () => {
+      await apiPost('/api/network', { ssl_cert_file: '', http_proxy: '', https_proxy: '', no_proxy: '' });
+      showToast('Cleared custom network & certificate settings');
+      await openCustomizationsModal('network');
+    };
+    modalBg.classList.add('open');
+    return;
+  }
 
   if (activeTab === 'extensions') {
     const ext = await apiGet('/api/extensions?workspace=' + encodeURIComponent(appState.workspace));
@@ -1984,6 +2345,7 @@ async function openCustomizationsModal(activeTab = 'provider') {
         const badges = [];
         if (n === prof.active) badges.push('<span class="badge">Active</span>');
         if (n === prof.fallback) badges.push('<span class="badge ok">Fallback</span>');
+        if (n === prof.fast) badges.push('<span class="badge" style="background:var(--warn-bg);color:var(--warn-text);">Fast</span>');
         return `<div class="profile-row">
           <div style="min-width:0;">
             <div style="font-weight:600;display:flex;align-items:center;gap:6px;">${esc(n)} ${badges.join(' ')}</div>
@@ -2030,12 +2392,19 @@ async function openCustomizationsModal(activeTab = 'provider') {
       <input id="pName" placeholder="Profile name (e.g. LocalOrnith)" style="flex:1;padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;" />
       <button type="button" id="pSaveBtn" class="btn">Save Profile</button>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;">
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
       <select id="pFbSel" style="flex:1;padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;">
         <option value="">Auto-fallback: Disabled</option>
         ${profNames.map(n => `<option value="${esc(n)}" ${n===prof.fallback?'selected':''}>Fallback: ${esc(n)}</option>`).join('')}
       </select>
       <button type="button" id="pFbBtn" class="btn">Set Fallback</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <select id="pFastSel" style="flex:1;padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;">
+        <option value="">Fast Routing Profile (summaries / commits / triage): Primary</option>
+        ${profNames.map(n => `<option value="${esc(n)}" ${n===prof.fast?'selected':''}>Fast: ${esc(n)}</option>`).join('')}
+      </select>
+      <button type="button" id="pFastBtn" class="btn">Set Fast</button>
     </div>
     <div id="cProfilesList">${profilesListHtml}</div>`;
 
@@ -2086,6 +2455,12 @@ async function openCustomizationsModal(activeTab = 'provider') {
       await apiPost('/api/profiles/fallback', { name: document.getElementById('pFbSel').value });
       appState = await apiGet('/api/bootstrap'); renderAll(); await openCustomizationsModal('provider'); showToast('Updated fallback profile');
     } catch (err) { note('Fallback error: ' + err.message); }
+  };
+  document.getElementById('pFastBtn').onclick = async () => {
+    try {
+      await apiPost('/api/profiles/fast', { name: document.getElementById('pFastSel').value });
+      appState = await apiGet('/api/bootstrap'); renderAll(); await openCustomizationsModal('provider'); showToast('Updated fast routing profile');
+    } catch (err) { note('Fast profile error: ' + err.message); }
   };
   body.querySelectorAll('[data-use-prof]').forEach(btn => {
     btn.onclick = async () => {
@@ -2362,7 +2737,187 @@ async function openAttachFileModal() {
   setTimeout(() => document.getElementById('attachSearch')?.focus(), 40);
 }
 
+/* ---- Persistent Project Memory Modal (.agent/MEMORY.md) ---- */
+async function openMemoryModal() {
+  const modalBg = document.getElementById('modalBg');
+  document.getElementById('modalTitle').textContent = 'Persistent Project Memory (.agent/MEMORY.md)';
+  const body = document.getElementById('modalBody');
+  const mem = await apiGet('/api/memory?workspace=' + encodeURIComponent(appState.workspace));
+  const rules = mem.rules || [];
+  body.innerHTML = `
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:12px;">
+      Rules saved here are automatically injected into every chat session for <strong>${esc(appState.workspace_name)}</strong> (conventions, test commands, architectural guardrails).
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <input id="memRuleInput" placeholder="e.g. Always use pytest -q and Pydantic v2 models" style="flex:1;padding:7px 10px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;" />
+      <button type="button" id="memRuleAddBtn" class="btn primary">Add Rule</button>
+    </div>
+    <div style="margin-bottom:14px;">
+      ${rules.length ? rules.map((r, i) => `<div class="profile-row"><span>• ${esc(r)}</span><button type="button" class="btn sm danger" data-mem-del="${i}">✕</button></div>`).join('') : '<div style="font-size:12.5px;color:var(--muted);">No memory rules yet. Add one above!</div>'}
+    </div>
+    <details>
+      <summary style="font-size:12px;color:var(--muted);cursor:pointer;margin-bottom:6px;">Raw .agent/MEMORY.md Editor</summary>
+      <textarea id="memRawTa" rows="8" style="width:100%;padding:8px 10px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;font-family:var(--mono);font-size:12px;">${esc(mem.content || '')}</textarea>
+      <div style="margin-top:8px;"><button type="button" id="memRawSaveBtn" class="btn sm primary">Save MEMORY.md</button></div>
+    </details>`;
+  const addRule = async () => {
+    const txt = document.getElementById('memRuleInput').value.trim();
+    if (!txt) return;
+    try {
+      const r = await apiPost('/api/memory', { workspace: appState.workspace, add_rule: txt });
+      if (r.state) appState = r.state;
+      renderTopAndSidebar();
+      await openMemoryModal();
+      showToast('Added project memory rule');
+    } catch (err) { showToast(err.message, true); }
+  };
+  document.getElementById('memRuleAddBtn').onclick = addRule;
+  document.getElementById('memRuleInput').onkeydown = (e) => { if (e.key === 'Enter') addRule(); };
+  body.querySelectorAll('[data-mem-del]').forEach(btn => {
+    btn.onclick = async () => {
+      const r = await apiPost('/api/memory', { workspace: appState.workspace, remove_index: Number(btn.dataset.memDel) });
+      if (r.state) appState = r.state;
+      renderTopAndSidebar();
+      await openMemoryModal();
+    };
+  });
+  document.getElementById('memRawSaveBtn').onclick = async () => {
+    const r = await apiPost('/api/memory', { workspace: appState.workspace, content: document.getElementById('memRawTa').value });
+    if (r.state) appState = r.state;
+    renderTopAndSidebar();
+    await openMemoryModal();
+    showToast('Saved .agent/MEMORY.md');
+  };
+  modalBg.classList.add('open');
+  setTimeout(() => document.getElementById('memRuleInput')?.focus(), 40);
+}
+
+/* ---- Export Session as Markdown ---- */
+async function exportSessionMarkdown() {
+  try {
+    const r = await apiGet('/api/session/export?workspace=' + encodeURIComponent(appState.workspace));
+    const md = r.markdown || '';
+    const fname = r.filename || 'adk-coder-session.md';
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    navigator.clipboard?.writeText(md);
+    showToast('Exported ' + fname + ' (also copied to clipboard)');
+  } catch (err) { showToast('Export failed: ' + err.message, true); }
+}
+
+/* ---- Command Palette (⌘K / Ctrl+K) ---- */
+function closeCommandPalette() {
+  document.getElementById('paletteBg').classList.remove('open');
+}
+
+async function openCommandPalette() {
+  const bg = document.getElementById('paletteBg');
+  const inp = document.getElementById('paletteInput');
+  const listEl = document.getElementById('paletteList');
+  bg.classList.add('open');
+  inp.value = '';
+  paletteIdx = 0;
+
+  const files = await ensureWsFilesCached();
+  const baseActions = [
+    { cat: 'Action', label: 'New Session', detail: '⌘N', run: () => document.getElementById('newSessionBtn').click() },
+    { cat: 'Action', label: 'Toggle Auto-Verify Tests', detail: appState?.auto_verify ? 'Currently On' : 'Currently Off', run: () => document.getElementById('autoVerifyBtn').click() },
+    { cat: 'Action', label: 'Project Memory (.agent/MEMORY.md)', detail: `${appState?.memory_count || 0} rules`, run: openMemoryModal },
+    { cat: 'Action', label: 'Export Session as Markdown (.md)', detail: 'Download & copy', run: exportSessionMarkdown },
+    { cat: 'Action', label: 'Switch / Open Workspace', detail: appState?.workspace_name || '', run: openWorkspaceModal },
+    { cat: 'Drawer', label: 'Open Interactive API / REST Tester', detail: 'Test routes & curl', run: () => loadDrawer('rest') },
+    { cat: 'Drawer', label: 'Open Files (View & Inline Edit)', detail: 'Save with ⌘S', run: () => loadDrawer('files') },
+    { cat: 'Drawer', label: 'Open Git Diff & Per-Hunk Review', detail: 'Revert hunks / commit', run: () => loadDrawer('diff') },
+    { cat: 'Drawer', label: 'Open Streaming Terminal & Watch', detail: 'Run tests live', run: () => loadDrawer('terminal') },
+    { cat: 'Drawer', label: 'Open Inspector (Security / Diagram / SBOM)', detail: 'Offline tools', run: () => loadDrawer('inspector') },
+    { cat: 'Settings', label: 'Provider, Profiles & Fast Routing', detail: appState?.model || '', run: () => openCustomizationsModal('provider') },
+    { cat: 'Settings', label: 'Corporate CA Certificates & Proxy', detail: 'SSL_CERT_FILE / HTTP_PROXY', run: () => openCustomizationsModal('network') },
+    { cat: 'Settings', label: 'Skills, Commands, Hooks & MCP', detail: 'Extensions', run: () => openCustomizationsModal('extensions') },
+    { cat: 'Settings', label: 'Automations & Project Scaffolder', detail: 'New project / workflows', run: () => openAutomationsModal('workflows') },
+    { cat: 'Settings', label: 'Cycle Theme (Light / Dark / System)', detail: '', run: () => document.getElementById('themeToggleBtn').click() },
+  ];
+  const wsActions = (appState?.workspaces || []).map(w => ({
+    cat: 'Workspace', label: w.name, detail: w.path,
+    run: async () => { appState = await apiPost('/api/workspace/select', { workspace: w.path }); cachedWsFilesRoot = ''; renderAll(); showToast('Switched to ' + w.name); }
+  }));
+  const profActions = Object.keys(appState?.profiles?.profiles || {}).sort().map(n => ({
+    cat: 'Profile', label: `Use Profile: ${n}`, detail: (appState.profiles.profiles[n] || {}).model || '',
+    run: async () => { await apiPost('/api/profiles/use', { name: n, workspace: appState.workspace }); appState = await apiGet('/api/bootstrap'); renderAll(); showToast('Switched to profile: ' + n); }
+  }));
+  const cmdActions = (appState?.commands || []).slice(0, 45).map(c => ({
+    cat: 'Command', label: c.name, detail: c.args || '',
+    run: () => {
+      if (c.name === '/debug') openDebugModal();
+      else if (c.args && c.args.startsWith('<')) { const p = document.getElementById('promptInput'); p.value = c.name + ' '; p.focus(); }
+      else sendMessage(c.name);
+    }
+  }));
+  const fileActions = files.slice(0, 200).map(f => ({
+    cat: 'File', label: f, detail: 'Open in editor',
+    run: () => openFileInDrawer(f)
+  }));
+  const allEntries = [...baseActions, ...wsActions, ...profActions, ...cmdActions, ...fileActions];
+
+  const renderPal = (q) => {
+    const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    paletteItems = allEntries.filter(it => {
+      if (!terms.length) return it.cat !== 'File';
+      const hay = `${it.cat} ${it.label} ${it.detail}`.toLowerCase();
+      return terms.every(t => hay.includes(t));
+    }).slice(0, 35);
+    if (paletteIdx >= paletteItems.length) paletteIdx = 0;
+    listEl.innerHTML = paletteItems.length
+      ? paletteItems.map((it, i) => `
+          <div class="palette-item ${i === paletteIdx ? 'sel' : ''}" data-pal-idx="${i}">
+            <div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+              <span class="palette-cat" style="margin-right:8px;">${esc(it.cat)}</span>
+              <strong>${esc(it.label)}</strong>
+            </div>
+            <span style="font-size:11px;color:var(--muted);flex-shrink:0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.detail)}</span>
+          </div>`).join('')
+      : '<div style="padding:14px;font-size:12.5px;color:var(--muted);text-align:center;">No matching actions, commands, or files.</div>';
+    listEl.querySelectorAll('[data-pal-idx]').forEach(el => {
+      el.onclick = () => {
+        const chosen = paletteItems[Number(el.dataset.palIdx)];
+        closeCommandPalette();
+        if (chosen) chosen.run();
+      };
+    });
+  };
+  renderPal('');
+  inp.oninput = () => { paletteIdx = 0; renderPal(inp.value); };
+  inp.onkeydown = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeCommandPalette(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (paletteItems.length) { paletteIdx = (paletteIdx + 1) % paletteItems.length; renderPal(inp.value); } return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); if (paletteItems.length) { paletteIdx = (paletteIdx - 1 + paletteItems.length) % paletteItems.length; renderPal(inp.value); } return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const chosen = paletteItems[paletteIdx];
+      closeCommandPalette();
+      if (chosen) chosen.run();
+    }
+  };
+  setTimeout(() => inp.focus(), 30);
+}
+
 /* ---- Wire Controls ---- */
+document.getElementById('paletteBg').onclick = (e) => { if (e.target.id === 'paletteBg') closeCommandPalette(); };
+document.getElementById('cmdPaletteBtn').onclick = openCommandPalette;
+document.getElementById('exportSessBtn').onclick = exportSessionMarkdown;
+document.getElementById('memoryBtn').onclick = openMemoryModal;
+document.getElementById('autoVerifyBtn').onclick = async () => {
+  try {
+    const next = !appState?.auto_verify;
+    const r = await apiPost('/api/auto-verify', { workspace: appState.workspace, enabled: next });
+    appState = r.state;
+    renderTopAndSidebar();
+    showToast(next ? 'Auto-Verify enabled (runs tests after code edits)' : 'Auto-Verify disabled');
+  } catch (err) { showToast('Auto-Verify toggle failed: ' + err.message, true); }
+};
 document.getElementById('toggleSidebarBtn').onclick = () => document.getElementById('mainBody').classList.toggle('sidebar-collapsed');
 document.getElementById('themeToggleBtn').onclick = () => {
   const cur = localStorage.getItem('adk_coder_theme') || 'system';
@@ -2455,6 +3010,13 @@ cBox.addEventListener('drop', (e) => {
   }
 });
 document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    const bg = document.getElementById('paletteBg');
+    if (bg.classList.contains('open')) closeCommandPalette();
+    else openCommandPalette();
+    return;
+  }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
     e.preventDefault(); document.getElementById('newSessionBtn').click();
   }
@@ -2479,13 +3041,15 @@ function connectEvents() {
     try {
       const ev = JSON.parse(msg.data);
       if (ev.type === 'turn_start' && !liveTurn) {
-        liveTurn = { turnId: ev.turn_id || 0, userMessage: ev.message || '', startedTime: nowTime(), steps: [], thought: '', text: '', debugPipeline: null };
+        liveTurn = { turnId: ev.turn_id || 0, userMessage: ev.message || '', startedTime: nowTime(), steps: [], thought: '', text: '', autoVerify: null, debugPipeline: null };
         startTurnPoller();
         renderAll();
       } else if (ev.type === 'thought' && liveTurn) {
         liveTurn.thought += ev.text; renderChat();
       } else if (ev.type === 'text' && liveTurn) {
         liveTurn.text += ev.text; renderChat();
+      } else if (ev.type === 'auto_verify' && liveTurn) {
+        liveTurn.autoVerify = ev; renderChat();
       } else if (ev.type === 'tool_call' && liveTurn) {
         if (ev.step) upsertLiveStep(ev.step);
         renderChat();

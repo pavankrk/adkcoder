@@ -38,6 +38,19 @@ ENV_KEYS = (
     "ANTHROPIC_API_KEY",
     "GROQ_API_KEY",
     "OPENROUTER_API_KEY",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+)
+
+NETWORK_ENV_KEYS = (
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
 )
 
 PROVIDERS = (
@@ -197,13 +210,68 @@ def _build_chat_completions_url(root: str) -> str:
 
 
 def _ssl_context() -> ssl.SSLContext:
-    """Build a verified SSLContext that works on macOS python.org builds without SSL_CERT_FILE."""
+    """Build a verified SSLContext honoring custom corporate CA bundles before certifi."""
+    for env_var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+        custom_ca = (os.environ.get(env_var) or "").strip()
+        if custom_ca and Path(custom_ca).expanduser().is_file():
+            return ssl.create_default_context(cafile=str(Path(custom_ca).expanduser()))
     try:
         import certifi
 
         return ssl.create_default_context(cafile=certifi.where())
     except ImportError:
         return ssl.create_default_context()
+
+
+def load_network_settings(env_path: Path) -> dict[str, Any]:
+    """Load corporate CA bundle and proxy settings from .env merged with process env."""
+    env_vals = parse_env_file(env_path)
+    ssl_cert = (
+        env_vals.get("SSL_CERT_FILE")
+        or env_vals.get("REQUESTS_CA_BUNDLE")
+        or os.environ.get("SSL_CERT_FILE")
+        or os.environ.get("REQUESTS_CA_BUNDLE")
+        or ""
+    ).strip()
+    ca_exists = bool(ssl_cert and Path(ssl_cert).expanduser().is_file())
+    return {
+        "env_path": str(env_path),
+        "ssl_cert_file": ssl_cert,
+        "ca_exists": ca_exists,
+        "http_proxy": (env_vals.get("HTTP_PROXY") or os.environ.get("HTTP_PROXY") or "").strip(),
+        "https_proxy": (env_vals.get("HTTPS_PROXY") or os.environ.get("HTTPS_PROXY") or "").strip(),
+        "no_proxy": (env_vals.get("NO_PROXY") or os.environ.get("NO_PROXY") or "").strip(),
+    }
+
+
+def save_network_settings(env_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    """Persist corporate CA bundle and proxy settings to .env and apply live to os.environ."""
+    raw_ca = str(payload.get("ssl_cert_file") or "").strip()
+    ca_path = ""
+    if raw_ca:
+        expanded = Path(raw_ca).expanduser().resolve()
+        if not expanded.is_file():
+            raise ValueError(f"CA bundle file not found: {expanded}")
+        ca_path = str(expanded)
+
+    http_proxy = str(payload.get("http_proxy") or "").strip()
+    https_proxy = str(payload.get("https_proxy") or "").strip()
+    no_proxy = str(payload.get("no_proxy") or "").strip()
+
+    updates = {
+        "SSL_CERT_FILE": ca_path,
+        "REQUESTS_CA_BUNDLE": ca_path,
+        "HTTP_PROXY": http_proxy,
+        "HTTPS_PROXY": https_proxy,
+        "NO_PROXY": no_proxy,
+    }
+    write_env_file(env_path, updates)
+    for key, val in updates.items():
+        if val:
+            os.environ[key] = val
+        else:
+            os.environ.pop(key, None)
+    return {"ok": True, **load_network_settings(env_path)}
 
 
 def _http_post_json(
@@ -1339,6 +1407,12 @@ def dispatch_request(
                 "application/json; charset=utf-8",
                 json.dumps(masked_profiles_summary(env_path)).encode("utf8"),
             )
+        if path == "/api/network":
+            return (
+                HTTPStatus.OK,
+                "application/json; charset=utf-8",
+                json.dumps(load_network_settings(env_path)).encode("utf8"),
+            )
         return (
             HTTPStatus.NOT_FOUND,
             "application/json; charset=utf-8",
@@ -1390,6 +1464,15 @@ def dispatch_request(
 
                 store = set_fallback_profile(str(payload.get("name") or ""), env_path=env_path)
                 data = {"ok": True, "fallback": store["fallback"]}
+            elif path == "/api/profiles/fast":
+                from .profiles import set_fast_profile
+
+                store = set_fast_profile(str(payload.get("name") or ""), env_path=env_path)
+                data = {"ok": True, "fast": store["fast"]}
+            elif path == "/api/network":
+                data = save_network_settings(env_path, payload)
+                if on_save is not None:
+                    on_save(data)
             elif path == "/api/profiles/delete":
                 from .profiles import delete_profile
 

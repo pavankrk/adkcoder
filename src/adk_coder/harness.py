@@ -72,7 +72,7 @@ COMMANDS = {
     "hooks": "[list|init]",
     "mcp": "[list|add <name> <cmd> [args...]|remove <name>]",
     "model": "[list|index|model]",
-    "profile": "[list|save <name>|use <name>|fallback <name|none>|delete <name>]",
+    "profile": "[list|save <name>|use <name>|fallback <name|none>|fast <name|none>|delete <name>]",
     "config": "[key [value]]",
     "task": "[add <text>|done <n>|rm <n>|list]",
     "compact": "",
@@ -128,6 +128,7 @@ CONFIG_KEYS = {
     "shell_mode",
     "sandbox_shell",
     "repo_map",
+    "auto_verify",
 }
 
 _PROVIDER_GROUP = "|".join(re.escape(p.rstrip("/")) for p in LITELLM_PREFIXES)
@@ -329,11 +330,11 @@ class AgentHarness:
         return self.set_mode(MODES[(idx + 1) % len(MODES)])
 
     def load_project_rules(self) -> tuple[list[str], str]:
-        """Auto-load AGENTS.md / CLAUDE.md / .agent/RULES.md instructions from the workspace."""
+        """Auto-load AGENTS.md / CLAUDE.md / .agent/RULES.md / .agent/MEMORY.md instructions."""
         loaded_names: list[str] = []
         sections: list[str] = []
         budget = 6000
-        for rel in ("AGENTS.md", "CLAUDE.md", ".agent/RULES.md"):
+        for rel in ("AGENTS.md", "CLAUDE.md", ".agent/RULES.md", ".agent/MEMORY.md"):
             path = self.root / rel
             if not path.is_file():
                 continue
@@ -345,7 +346,12 @@ class AgentHarness:
                 continue
             loaded_names.append(rel)
             snippet = content[:budget]
-            sections.append(f"## Project Rules ({rel})\n{snippet}")
+            heading = (
+                f"## Project Memory ({rel})"
+                if rel == ".agent/MEMORY.md"
+                else f"## Project Rules ({rel})"
+            )
+            sections.append(f"{heading}\n{snippet}")
             budget -= len(snippet)
             if budget <= 200:
                 break
@@ -414,11 +420,54 @@ class AgentHarness:
         stream_display: StreamDisplay | None = None,
         fast: bool = False,
     ) -> str:
-        active_model = (
-            self.config.get("fast_model") if fast and self.config.get("fast_model") else self.model
-        )
+        active_model = self.model
+        fast_prof: dict | None = None
+        saved_env: dict[str, str | None] | None = None
+        if fast:
+            if self.config.get("fast_model"):
+                active_model = self.config["fast_model"]
+            else:
+                from .profiles import apply_profile_to_env, get_fast_profile
+
+                fp = get_fast_profile()
+                if fp is not None and fp[1].get("model"):
+                    fast_prof = fp[1]
+                    active_model = str(fast_prof["model"])
+                    env_keys = (
+                        "ADK_CODER_MODEL",
+                        "ADK_CODER_MODE",
+                        "OPENAI_API_BASE",
+                        "OPENAI_BASE_URL",
+                        "OPENAI_API_KEY",
+                        "AZURE_API_BASE",
+                        "AZURE_API_KEY",
+                        "AZURE_API_VERSION",
+                        "ADK_CODER_ENDPOINT_API_KEY",
+                        "OLLAMA_HOST",
+                        "OLLAMA_API_BASE",
+                        "GOOGLE_API_KEY",
+                        "GOOGLE_GENAI_USE_VERTEXAI",
+                        "ANTHROPIC_API_KEY",
+                        "OPENROUTER_API_KEY",
+                        "GROQ_API_KEY",
+                    )
+                    saved_env = {k: os.environ.get(k) for k in env_keys}
+                    apply_profile_to_env(fast_prof)
+
         options: dict = {}
-        if active_model.startswith("azure/"):
+        if fast_prof is not None:
+            if fast_prof.get("base_url") and active_model.startswith(
+                ("azure/", "openai/", "ollama/", "ollama_chat/")
+            ):
+                base_val = str(fast_prof["base_url"])
+                if active_model.startswith(("ollama/", "ollama_chat/")) and not base_val.startswith(
+                    ("http://", "https://")
+                ):
+                    base_val = f"http://{base_val}"
+                options["api_base"] = base_val
+            if active_model.startswith("azure/") and fast_prof.get("api_version"):
+                options["api_version"] = str(fast_prof["api_version"])
+        elif active_model.startswith("azure/"):
             api_base = (
                 self.config.get("azure_api_base")
                 or os.environ.get("AZURE_API_BASE")
@@ -487,49 +536,69 @@ class AgentHarness:
                 options["on_text"] = stream_display.on_text
                 options["on_thought"] = stream_display.on_thought
         try:
-            if options:
-                return await generate(active_model, role, prompt, tools, **options)
-            return await generate(active_model, role, prompt, tools)
-        except Exception as exc:
-            from .profiles import (
-                apply_profile_to_env,
-                get_fallback_profile,
-                is_transient_provider_error,
-            )
+            try:
+                if options:
+                    return await generate(active_model, role, prompt, tools, **options)
+                return await generate(active_model, role, prompt, tools)
+            except Exception as exc:
+                from .profiles import (
+                    apply_profile_to_env,
+                    get_fallback_profile,
+                    is_transient_provider_error,
+                )
 
-            if not is_transient_provider_error(exc):
-                raise
-            fb = get_fallback_profile(active_model)
-            if fb is None:
-                raise
-            fb_name, fb_prof = fb
-            fb_model = str(fb_prof.get("model") or "")
-            if not fb_model:
-                raise
-            apply_profile_to_env(fb_prof)
-            fb_options = dict(options)
-            if fb_model.startswith("openai/"):
-                if fb_prof.get("base_url"):
-                    fb_options["api_base"] = fb_prof["base_url"]
+                if not is_transient_provider_error(exc):
+                    raise
+                fb = get_fallback_profile(active_model)
+                if fb is None:
+                    raise
+                fb_name, fb_prof = fb
+                fb_model = str(fb_prof.get("model") or "")
+                if not fb_model:
+                    raise
+                apply_profile_to_env(fb_prof)
+                fb_options = dict(options)
+                if fb_model.startswith("openai/"):
+                    if fb_prof.get("base_url"):
+                        fb_options["api_base"] = fb_prof["base_url"]
+                    else:
+                        fb_options.pop("api_base", None)
+                elif fb_model.startswith("azure/"):
+                    if fb_prof.get("base_url"):
+                        fb_options["api_base"] = fb_prof["base_url"]
+                    if fb_prof.get("api_version"):
+                        fb_options["api_version"] = fb_prof["api_version"]
+                elif fb_model.startswith(("ollama/", "ollama_chat/")):
+                    fb_options["api_base"] = fb_prof.get("base_url") or "http://127.0.0.1:11434"
                 else:
                     fb_options.pop("api_base", None)
-            elif fb_model.startswith(("ollama/", "ollama_chat/")):
-                fb_options["api_base"] = fb_prof.get("base_url") or "http://127.0.0.1:11434"
-            else:
-                fb_options.pop("api_base", None)
-            console.print(
-                f"[yellow]Primary model `{active_model}` unreachable ({type(exc).__name__}); "
-                f"failing over to profile `{fb_name}` (`{fb_model}`)...[/]"
-            )
-            if fb_options:
-                return await generate(fb_model, role, prompt, tools, **fb_options)
-            return await generate(fb_model, role, prompt, tools)
+                console.print(
+                    f"[yellow]Primary model `{active_model}` unreachable ({type(exc).__name__}); "
+                    f"failing over to profile `{fb_name}` (`{fb_model}`)...[/]"
+                )
+                if fb_options:
+                    return await generate(fb_model, role, prompt, tools, **fb_options)
+                return await generate(fb_model, role, prompt, tools)
+        finally:
+            if saved_env is not None:
+                for k, v in saved_env.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+
+    def _has_fast_target(self) -> bool:
+        if self.config.get("fast_model"):
+            return True
+        from .profiles import get_fast_profile
+
+        return get_fast_profile() is not None
 
     async def compact(self) -> str:
         memory = self.read("context_summary.md")
         if memory.strip():
             with spinning("Compacting context"):
-                if self.config.get("fast_model"):
+                if self._has_fast_target():
                     summary = await self.ask(
                         "Summarize decisions, constraints and pending work.",
                         memory,
@@ -770,7 +839,7 @@ class AgentHarness:
                 msg_prompt = f"{stat}\n\n{staged[:12000]}"
                 draft = (
                     await self.ask(msg_role, msg_prompt, fast=True)
-                    if self.config.get("fast_model")
+                    if self._has_fast_target()
                     else await self.ask(msg_role, msg_prompt)
                 )
             commit_msg = draft.strip().splitlines()[0].strip("`\"' ")
